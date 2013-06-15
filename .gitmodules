@@ -1,0 +1,4 @@
+[submodule "webrtc"]
+	path = src/main/native/webrtc
+	url = https://git.chromium.org/git/external/webrtc/trunk/webrtc.git
+	branch = master

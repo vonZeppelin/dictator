@@ -1,0 +1,8 @@
+.settings/
+bin/
+CMakeFiles/
+target/
+.classpath
+.lein-repl-history
+.project
+CMakeCache.txt
