@@ -13,7 +13,7 @@ const char RUNTIME_EXC_CLASS[] = "java/lang/RuntimeException";
 #endif
 #if (defined(__GNUC__) && __GNUC__ >= 4) || (defined(__has_attribute) && __has_attribute(visibility))
     #undef JNIEXPORT
-    #define JNIEXPORT __attribute__((visibility ("default")))
+    #define JNIEXPORT __attribute__((visibility("default")))
 #endif
 
 #define THROW_EXC(env, type, msg) { \
@@ -24,4 +24,4 @@ const char RUNTIME_EXC_CLASS[] = "java/lang/RuntimeException";
     (*env)->DeleteLocalRef(env, clazz); \
 }
 
-#endif //JNI_UTIL_H
+#endif // JNI_UTIL_H

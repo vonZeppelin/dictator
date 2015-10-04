@@ -23,6 +23,14 @@ JNIEXPORT jlong JNICALL Java_dictator_Native_createVAD
 JNIEXPORT void JNICALL Java_dictator_Native_freeVAD
   (JNIEnv *, jclass, jlong);
 
+/*
+ * Class:     dictator_Native
+ * Method:    processVAD
+ * Signature: (JI[BI)Z
+ */
+JNIEXPORT jboolean JNICALL Java_dictator_Native_processVAD
+  (JNIEnv *, jclass, jlong, jint, jbyteArray, jint);
+
 #ifdef __cplusplus
 }
 #endif

@@ -13,8 +13,11 @@
 ;; limitations under the License.
 
 (ns dictator.app
-  (:require [dictator [ui :refer [show-app]] [util :refer [init-native-code]]])
-  (:import [javax.swing SwingUtilities UIManager])
+  (:require
+    [dictator [ui :refer [show-app]]
+              [util :refer [init-native-code]]])
+  (:import
+    [javax.swing SwingUtilities UIManager])
   (:gen-class))
 
 (defn -main [& args]

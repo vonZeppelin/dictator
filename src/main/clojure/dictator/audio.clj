@@ -13,45 +13,62 @@
 ;; limitations under the License.
 
 (ns dictator.audio
-  (:require [dictator.util :refer [platform]])
+  (:require
+    [clojure.core.async :refer [<! chan go put! sliding-buffer thread]]
+    [dictator.util :refer [platform ->ValueHolder]])
   (:import
-    [javax.sound.sampled AudioFormat AudioInputStream AudioSystem Mixer Mixer$Info]
-    java.nio.ByteOrder))
+    dictator.Native$VAD
+    java.nio.ByteOrder
+    [javax.sound.sampled AudioFormat AudioInputStream AudioSystem DataLine$Info Mixer Mixer$Info TargetDataLine]))
 
-(def ^:private ^:const sample-rate 8000)
-
-;; A holder of a mixer's Info and name.
-(deftype MixerInfo [info name]
-  Object
-  (toString [_] name))
+(def ^:private ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
+;; the only value supported by WebRTC VAD?
+(def ^:private ^:const bit-depth 16)
+;; 30ms frames to make WebRTC VAD happy
+(def ^:private ^:const frame-length 0.03)
 
 (defn get-mixers []
-  "Returns a sequence of mixers supporting audio capturing. A mixer is wrapped into a MixerInfo instance."
-  (letfn [(can-capture? [info]
-            (with-open [mixer (AudioSystem/getMixer info)]
-              (.open mixer)
-              (-> mixer .getTargetLineInfo seq)))
-          (wrap [^Mixer$Info info]
-            (let [name (.getName info)
-                  fixed-name (if (= (:os platform) :win)
-                               (-> name (.getBytes "windows-1252") String.)
-                               name)]
-              (->MixerInfo info fixed-name)))]
+  "Returns a sequence of mixers supporting audio capturing. A mixer is wrapped into a ValueHolder instance."
+  (let [is-win? (= (:os platform) :win)
+        ;; let's use the max supported sample rate to filter out mixers
+        test-format (AudioFormat. 32000 bit-depth 1 true big-endian?)
+        line-info (DataLine$Info. TargetDataLine test-format)
+        can-capture? (fn [info]
+                       (with-open [mixer (AudioSystem/getMixer info)]
+                         (.open mixer)
+                         (.isLineSupported mixer line-info)))
+        wrap (fn [info]
+               (let [name (.getName info)
+                     fixed-name (if is-win?
+                                  (-> name (.getBytes "windows-1252") String.)
+                                  name)]
+                 (->ValueHolder fixed-name info)))]
     (->> (AudioSystem/getMixerInfo) (filter can-capture?) (map wrap))))
 
-(defn capture [mixer]
-  (let [big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder))
-        frmt (AudioFormat. sample-rate 16 1 true big-endian?)
-        line (AudioSystem/getTargetDataLine frmt (.info mixer))
-        frame-size 160 ; (speex-get-frame-size speex-modeid-nb)
-        filler (fn [fill]
-                 (let [buffer-len (* frame-size 2)
-                       buffer (byte-array buffer-len)]
-                   (with-open [stream (AudioInputStream. line)]
-                     (.open line frmt)
-                     (.start line)
-                     (loop [read (.read stream buffer)]
-                       (when (= read buffer-len)
-                         (-> buffer (java.util.Arrays/copyOf buffer-len) fill)
-                         (recur (.read stream buffer)))))))]
-    {:seq filler :line line}))
+(defn capture [mixer-info sample-rate]
+  "Returns a channel..."
+  (let [chnl (chan (sliding-buffer 5))]
+    (thread
+      (let [frmt (AudioFormat. sample-rate bit-depth 1 true big-endian?)
+            buffer-size (int (* frame-length (.getFrameSize frmt) (.getFrameRate frmt)))
+            buffer (byte-array buffer-size)]
+        (with-open [line (AudioSystem/getTargetDataLine frmt (.value mixer-info))
+                    stream (AudioInputStream. line)]
+            (.open line frmt)
+            (.start line)
+            (while (and
+                     (= (.read stream buffer) buffer-size)
+                     (put! chnl (aclone buffer))))
+            (.stop line)
+            (.flush line))))
+    chnl))
+
+(defn filter-voice [audio-channel frame-rate vad-mode]
+  ""
+  (let [frame-count (* frame-length frame-rate)]
+    (go
+      (with-open [vad (Native$VAD. vad-mode)]
+        (loop []
+          (when-some [frame (<! audio-channel)]
+            (println (.isVoice vad frame-rate frame frame-count))
+            (recur)))))))

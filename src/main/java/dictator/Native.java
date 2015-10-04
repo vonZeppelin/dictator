@@ -21,15 +21,28 @@ package dictator;
  * @author Leonid Bogdanov
  */
 public class Native {
+    public static final class VAD implements AutoCloseable {
+        private final long ptr;
+
+        public VAD(Aggressiveness aggressiveness) {
+            ptr = createVAD(aggressiveness.ordinal());
+        }
+
+        public boolean isVoice(int sampleRate, byte[] audio, int frameLen) {
+            return processVAD(ptr, sampleRate, audio, frameLen);
+        }
+
+        @Override
+        public void close() {
+            freeVAD(ptr);
+        }
+    }
+
     public static enum Aggressiveness {
         NORMAL, LOW_BITRATE, AGGRESSIVE, VERY_AGGRESSIVE;
     }
 
-    public static long createVAD(Aggressiveness aggressiveness) {
-        return createVAD(aggressiveness.ordinal());
-    }
-
-    public static native void freeVAD(long handle);
-
     private static native long createVAD(int aggressiveness);
+    private static native void freeVAD(long handle);
+    private static native boolean processVAD(long handle, int sampleRate, byte[] audio, int frameLen);
 }

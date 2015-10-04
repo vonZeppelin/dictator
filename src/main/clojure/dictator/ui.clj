@@ -13,74 +13,131 @@
 ;; limitations under the License.
 
 (ns dictator.ui
-  (:require [dictator [util :refer [text icon]] [audio :as audio]])
+  (:require
+    [clojure.core.async :refer [<! go close!]]
+    [clojure.java.io :as io]
+    [dictator [util :refer [icon text ->ValueHolder]]
+              [audio :as audio]])
   (:import
+    net.miginfocom.swing.MigLayout
+    [dictator Native Native$Aggressiveness]
     [java.awt Color Insets]
-    [javax.swing AbstractAction DefaultComboBoxModel ImageIcon JComboBox JFrame JLabel JMenu JMenuBar JMenuItem
-                 JOptionPane JPanel JSeparator JTabbedPane JToggleButton]
-    java.util.EventObject
-    net.miginfocom.swing.MigLayout))
+    [java.util EventObject Hashtable]
+    [javax.swing AbstractAction DefaultBoundedRangeModel DefaultComboBoxModel ImageIcon JCheckBox JComboBox JFrame
+                 JLabel JMenu JMenuBar JMenuItem JOptionPane JPanel JSeparator JSlider JTabbedPane JToggleButton]))
 
-(def ^:private ^DefaultComboBoxModel mixers-model (DefaultComboBoxModel.))
-(def ^:private capturer (atom nil))
+(def ^:private mixers-model (DefaultComboBoxModel.))
+(def ^:private sample-rates-model (DefaultBoundedRangeModel. 0 0 0 2))
+(def ^:private vad-mode-model (DefaultComboBoxModel.
+                                (into-array [(->ValueHolder (text ::vad.norm) Native$Aggressiveness/NORMAL)
+                                             (->ValueHolder (text ::vad.lb) Native$Aggressiveness/LOW_BITRATE)
+                                             (->ValueHolder (text ::vad.agg) Native$Aggressiveness/AGGRESSIVE)
+                                             (->ValueHolder (text ::vad.vagg) Native$Aggressiveness/VERY_AGGRESSIVE)])))
+(def ^:private dictation-channel (atom nil))
 
-(defn- build-menu [^JFrame frame]
+
+(defn- stop-dictation []
+  (if-let [ch @dictation-channel]
+    (close! ch)))
+
+(defn- start-dictation []
+  (if-let [mixer (.getSelectedItem mixers-model)]
+    (let [sample-rates [8000 16000 32000] ;; TODO Refactor?
+          sample-rate (-> sample-rates-model .getValue sample-rates)
+          vad-mode (-> vad-mode-model .getSelectedItem .value)
+          ch (audio/capture mixer sample-rate)]
+      (audio/filter-voice ch sample-rate vad-mode)
+      (reset! dictation-channel ch))))
+
+(defn- build-menu [frame]
   "Builds a main menu of the app."
   (let [menu (JMenuBar.)
         file-menu (JMenu. (text ::menu.file))
         help-menu (JMenu. (text ::menu.help))
         exit-action (proxy [AbstractAction] [(text ::menu.exit)]
-                      (actionPerformed [evt] (.dispose frame)))
+                      (actionPerformed [evt]
+                        (.dispose frame)))
         options-action (proxy [AbstractAction] [(text ::menu.options) (icon ::options)]
-                         (actionPerformed [evt] (println evt)))
+                         (actionPerformed [evt]
+                           (println evt)))
         about-action (proxy [AbstractAction] [(text ::menu.about) (icon ::about)]
                        (actionPerformed [evt]
                          (JOptionPane/showMessageDialog
-                           frame (text ::app.about) (text ::app.title)
-                           JOptionPane/PLAIN_MESSAGE (icon ::mic :large))))]
+                           frame
+                           (text ::app.about)
+                           (text ::app.title)
+                           JOptionPane/PLAIN_MESSAGE
+                           (icon ::darth :large))))]
     (doto file-menu
       (.add (JMenuItem. options-action))
       (.addSeparator)
       (.add (JMenuItem. exit-action)))
     (doto help-menu
       (.add (JMenuItem. about-action)))
-    (.add menu file-menu)
-    (.add menu help-menu)
+    (doto menu
+      (.add file-menu)
+      (.add help-menu)
+      (.setVisible false))
     (.setJMenuBar frame menu)))
 
 (defn- build-input-tab []
   ""
-  (doto (JPanel. (MigLayout. "wrap 2" "5[]rel[grow]5" "5[]5"))
+  (doto (JPanel. (MigLayout. "wrap 2" "[]rel[grow]" "[center]unrel[center]"))
     (.add (JLabel. (text ::input.device)))
     (.add
       (doto (JComboBox. mixers-model)
         (.setPrototypeDisplayValue ""))
+      "growx")
+    (.add (JLabel. (text ::sample.rate)))
+    (.add
+      (doto (JSlider. sample-rates-model)
+        (.setMajorTickSpacing 1)
+        (.setSnapToTicks true)
+        (.setPaintLabels true)
+        (.setPaintTicks true)
+        (.setLabelTable (let [khz (text ::khz)
+                              labels {(int 0) (JLabel. (str 8 khz))
+                                      (int 1) (JLabel. (str 16 khz))
+                                      (int 2) (JLabel. (str 32 khz))}]
+                          (Hashtable. labels))))
       "growx")))
 
-(defn- build-controls [^JFrame frame]
+(defn- build-misc-tab [frame]
+  ""
+  (let [ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
+                             (actionPerformed [evt]
+                               (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
+                             (isEnabled []
+                               (.isAlwaysOnTopSupported frame)))]
+    (doto (JPanel. (MigLayout. "wrap 2" "[]rel[grow]" "[center]unrel[center]"))
+      (.add (JCheckBox. ontop-action) "spanx 2")
+      (.add (JLabel. (text ::vad)))
+      (.add
+        (doto (JComboBox. vad-mode-model)
+          (.setPrototypeDisplayValue ""))
+        "growx"))))
+
+(defn- build-controls [frame]
   ""
   (let [tabbed-pane (JTabbedPane. JTabbedPane/BOTTOM JTabbedPane/SCROLL_TAB_LAYOUT)
         rec-action (proxy [AbstractAction] [(text ::rec)]
-                     (actionPerformed [^EventObject evt]
-                       (let [^JToggleButton rec-btn (.getSource evt)
-                             selected? (.isSelected rec-btn)]
-                         (if selected?
-                           (if-let [mixer (.getSelectedItem mixers-model)]
-                             (reset! capturer (audio/capture mixer)))
-                           (if-let [capturer @capturer]
-                             (-> capturer :line .stop))))))
+                     (actionPerformed [evt]
+                       (if (-> evt .getSource .isSelected)
+                         (start-dictation)
+                         (stop-dictation))))
         settings-action (proxy [AbstractAction] []
-                          (actionPerformed [^EventObject evt]
-                            (let [^JToggleButton config-btn (.getSource evt)
+                          (actionPerformed [evt]
+                            (let [config-btn (.getSource evt)
                                   selected? (.isSelected config-btn)]
                               (when selected?
                                 (.removeAllElements mixers-model)
                                 (doseq [mixer (audio/get-mixers)]
                                   (.addElement mixers-model mixer)))
                               (.setVisible tabbed-pane selected?)
+                              (-> frame .getJMenuBar (.setVisible selected?))
                               (.pack frame))))]
     (doto frame
-      (.setLayout (MigLayout. "wrap 2" "5[]unrel[]5" "5[]5[nogrid][]5"))
+      (.setLayout (MigLayout. "wrap 2" "[]unrel[]" "[]5[nogrid][]"))
       (.add (doto (JToggleButton. rec-action)
               (.setToolTipText (text ::rec.tip))
               (.setIcon (icon ::rec-off :large))
@@ -88,7 +145,7 @@
       (.add
         (doto (JPanel.)
           (.setBackground Color/BLACK))
-        "w 200, growy")
+        "wmin 200,grow")
       (.add (JLabel. (text ::settings)))
       (.add (JSeparator.) "growx")
       (.add
@@ -105,16 +162,16 @@
         (doto tabbed-pane
           (.setVisible false)
           (.add (text ::tab.input) (build-input-tab))
-          (.add (text ::tab.output) (JLabel. "Test"))
-          (.add (text ::tab.misc) (JLabel. "Test")))
-        "h 150, growx, span 2, hidemode 2"))))
+          (.add (text ::tab.output) (JLabel. "TBD"))
+          (.add (text ::tab.misc) (build-misc-tab frame)))
+        "growx,span 2,hidemode 2"))))
 
 (defn show-app []
   "Initializes a main frame and controls of the app, wires them together and shows the UI."
   (doto (JFrame. (text ::app.title))
     (build-menu)
     (build-controls)
-    (.setIconImages [(.getImage (icon ::mic)) (.getImage (icon ::mic :large))])
+    (.setIconImages [(.getImage (icon ::darth)) (.getImage (icon ::darth :large))])
     (.setDefaultCloseOperation JFrame/DISPOSE_ON_CLOSE)
     (.setResizable false)
     (.pack)

@@ -17,9 +17,9 @@
     [clojure.string :as string]
     [clojure.java.io :as io])
   (:import
-    [java.util MissingResourceException ResourceBundle]
     java.nio.file.Files
-    javax.swing.ImageIcon))
+    javax.swing.ImageIcon
+    [java.util MissingResourceException ResourceBundle]))
 
 ;; icon size -> icon resource name templates
 (def ^:private icon-sizes {:small "%s.png" :large "%s.32.png"})
@@ -35,13 +35,18 @@
                                (-> (System/getProperty "os.arch") string/trim string/lower-case))]
                      {:os os :is64 (contains? #{"64" "x86_64" "ia64" "amd64" "ppc64"} arch)}))
 
+;; A holder of a named value.
+(deftype ValueHolder [name value]
+  Object
+  (toString [_] name))
+
 (defn text
   "Returns a string resource identified by a key. A ResourceBundle to query is specified
    either explicitly or calculated from the key's namespace."
-  (^String [key]
+  ([key]
     (let [bundle (-> key namespace munge ResourceBundle/getBundle)]
       (text key bundle)))
-  (^String [key ^ResourceBundle bundle]
+  ([key bundle]
     (let [key (name key)]
       (try
         (.getString bundle key)
@@ -50,24 +55,22 @@
 (defn icon
   "Returns an ImageIcon resource of a specifed size (optional, defaults to ':small') and identified by a key.
    Currently supported sizes are ':small' and ':large'."
-  (^ImageIcon [key]
+  ([key]
     (icon key :small))
-  (^ImageIcon [key size]
+  ([key size]
     (let [icon-name (format (icon-sizes size) (name key))
           icon-path (-> key namespace munge (string/replace \. \/) (str \/ icon-name))
           icon (-> icon-path io/resource ImageIcon.)]
       icon)))
 
-(defn init-native-code
+(defn init-native-code []
  "Unpacks the native helper lib to the temp directory and loads it."
- []
- (let [empty-attrs (make-array java.nio.file.attribute.FileAttribute 0)
-       temp-dir-path (Files/createTempDirectory nil empty-attrs)
+ (let [lib-attrs (make-array java.nio.file.attribute.FileAttribute 0)
        lib-name (System/mapLibraryName "dictator")
        lib-res (if (:is64 platform)
                  (string/replace-first lib-name #"\.(?=\w+$)" "64.")
                  lib-name)
-       lib-file (-> temp-dir-path (Files/createTempFile nil nil empty-attrs) .toFile)]
+       lib-file (.toFile (Files/createTempFile nil lib-name lib-attrs))]
    (with-open [lib (-> lib-res io/resource io/input-stream)]
      (io/copy lib lib-file)
      (-> lib-file .getCanonicalPath System/load))))

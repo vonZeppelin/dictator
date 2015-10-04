@@ -2,7 +2,7 @@
 bin/
 CMakeFiles/
 target/
+.*repl*
 .classpath
-.lein-repl-history
 .project
 CMakeCache.txt
