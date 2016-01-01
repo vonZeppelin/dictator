@@ -16,6 +16,8 @@
 
 package dictator;
 
+import java.io.File;
+import java.io.IOException;
 
 /**
  * @author Leonid Bogdanov
@@ -28,8 +30,8 @@ public class Native {
             ptr = createVAD(aggressiveness.ordinal());
         }
 
-        public boolean isVoice(int sampleRate, byte[] audio, int frameLen) {
-            return processVAD(ptr, sampleRate, audio, frameLen);
+        public boolean isVoice(int sampleRate, byte[] audio) {
+            return processVAD(ptr, sampleRate, audio);
         }
 
         @Override
@@ -42,7 +44,11 @@ public class Native {
         NORMAL, LOW_BITRATE, AGGRESSIVE, VERY_AGGRESSIVE;
     }
 
+    public static void loadLibrary(File path) throws IOException {
+        System.load(path.getCanonicalPath());
+    }
+
     private static native long createVAD(int aggressiveness);
     private static native void freeVAD(long handle);
-    private static native boolean processVAD(long handle, int sampleRate, byte[] audio, int frameLen);
+    private static native boolean processVAD(long handle, int sampleRate, byte[] audio);
 }

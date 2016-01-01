@@ -14,11 +14,11 @@
 
 (ns dictator.audio
   (:require
-    [clojure.core.async :refer [<! chan go put! sliding-buffer thread]]
+    [clojure.core.async :as async :refer [<! >! >!! alt! chan close! go go-loop thread timeout]]
     [dictator.util :refer [platform ->ValueHolder]])
   (:import
     dictator.Native$VAD
-    java.nio.ByteOrder
+    java.io.ByteArrayOutputStream java.nio.ByteOrder
     [javax.sound.sampled AudioFormat AudioInputStream AudioSystem DataLine$Info Mixer Mixer$Info TargetDataLine]))
 
 (def ^:private ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
@@ -45,9 +45,9 @@
                  (->ValueHolder fixed-name info)))]
     (->> (AudioSystem/getMixerInfo) (filter can-capture?) (map wrap))))
 
-(defn capture [mixer-info sample-rate]
-  "Returns a channel..."
-  (let [chnl (chan (sliding-buffer 5))]
+(defn capture-sound [mixer-info sample-rate]
+  "Returns a channel of captured voice frames."
+  (let [out-channel (chan)]
     (thread
       (let [frmt (AudioFormat. sample-rate bit-depth 1 true big-endian?)
             buffer-size (int (* frame-length (.getFrameSize frmt) (.getFrameRate frmt)))
@@ -58,17 +58,46 @@
             (.start line)
             (while (and
                      (= (.read stream buffer) buffer-size)
-                     (put! chnl (aclone buffer))))
+                     (>!! out-channel (aclone buffer))))
             (.stop line)
             (.flush line))))
-    chnl))
+    out-channel))
 
 (defn filter-voice [audio-channel frame-rate vad-mode]
-  ""
-  (let [frame-count (* frame-length frame-rate)]
+  "Returns a channel of frames with actual voice."
+  (let [out-channel (chan)
+        ;; let's do voice / no voice decision based on 5 consecutive frames
+        parted-channel (async/partition 5 audio-channel)]
     (go
       (with-open [vad (Native$VAD. vad-mode)]
         (loop []
-          (when-some [frame (<! audio-channel)]
-            (println (.isVoice vad frame-rate frame frame-count))
-            (recur)))))))
+          (let [frames (<! parted-channel)
+                has-voice? #(.isVoice vad frame-rate %)]
+            (if frames
+              (do
+                (when (every? has-voice? frames)
+                  (doseq [frame frames]
+                    (>! out-channel frame)))
+                (recur))
+              (close! out-channel))))))
+    out-channel))
+
+(defn aggregate-chunks [audio-channel pause-lenght]
+  "Returns a channel with aduio frames aggregated into larger chunks
+   based on pauses in speech of greater than or equal to specified ms length"
+  (let [out-channel (chan)
+        ;; reusable buffer of initially 50kB
+        chunk (ByteArrayOutputStream. 50000)]
+    (go-loop []
+      (alt! audio-channel ([frame] (if frame
+                                     (do
+                                       (.write chunk frame)
+                                       (recur))
+                                     (close! out-channel)))
+            (timeout pause-lenght) (if (zero? (.size chunk))
+                                     (recur)
+                                     (do
+                                       (>! out-channel (.toByteArray chunk))
+                                       (.reset chunk)
+                                       (recur)))))
+    out-channel))

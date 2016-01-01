@@ -17,6 +17,7 @@
     [clojure.string :as string]
     [clojure.java.io :as io])
   (:import
+    dictator.Native
     java.nio.file.Files
     javax.swing.ImageIcon
     [java.util MissingResourceException ResourceBundle]))
@@ -73,4 +74,4 @@
        lib-file (.toFile (Files/createTempFile nil lib-name lib-attrs))]
    (with-open [lib (-> lib-res io/resource io/input-stream)]
      (io/copy lib lib-file)
-     (-> lib-file .getCanonicalPath System/load))))
+     (Native/loadLibrary lib-file))))
