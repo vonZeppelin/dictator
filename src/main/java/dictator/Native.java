@@ -40,6 +40,23 @@ public class Native {
         }
     }
 
+    public static final class MP3Enc implements AutoCloseable {
+        private final long ptr;
+
+        public MP3Enc(int sampleRate, int brate) {
+            ptr = createLAME(sampleRate, brate);
+        }
+
+        public byte[] encode(byte[] audio) {
+            return encodeLAME(ptr, audio);
+        }
+
+        @Override
+        public void close() {
+            freeLAME(ptr);
+        }
+    }
+
     public static enum Aggressiveness {
         NORMAL, LOW_BITRATE, AGGRESSIVE, VERY_AGGRESSIVE;
     }
@@ -51,4 +68,7 @@ public class Native {
     private static native long createVAD(int aggressiveness);
     private static native void freeVAD(long handle);
     private static native boolean processVAD(long handle, int sampleRate, byte[] audio);
+    private static native long createLAME(int sampleRate, int brate);
+    private static native byte[] encodeLAME(long handle, byte[] audio);
+    private static native void freeLAME(long handle);
 }

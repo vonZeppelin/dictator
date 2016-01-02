@@ -31,6 +31,30 @@ JNIEXPORT void JNICALL Java_dictator_Native_freeVAD
 JNIEXPORT jboolean JNICALL Java_dictator_Native_processVAD
   (JNIEnv *, jclass, jlong, jint, jbyteArray);
 
+/*
+ * Class:     dictator_Native
+ * Method:    createLAME
+ * Signature: (II)J
+ */
+JNIEXPORT jlong JNICALL Java_dictator_Native_createLAME
+  (JNIEnv *, jclass, jint, jint);
+
+/*
+ * Class:     dictator_Native
+ * Method:    encodeLAME
+ * Signature: (J[B)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_dictator_Native_encodeLAME
+  (JNIEnv *, jclass, jlong, jbyteArray);
+
+/*
+ * Class:     dictator_Native
+ * Method:    freeLAME
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_dictator_Native_freeLAME
+  (JNIEnv *, jclass, jlong);
+
 #ifdef __cplusplus
 }
 #endif

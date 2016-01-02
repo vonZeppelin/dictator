@@ -1,3 +1,6 @@
 [submodule "webrtc"]
 	path = src/main/native/webrtc
 	url = https://chromium.googlesource.com/external/webrtc
+[submodule "lame"]
+	path = src/main/native/lame
+	url = https://github.com/bardware/lame.git

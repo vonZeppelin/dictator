@@ -6,7 +6,8 @@
 #ifndef JNI_UTIL_H
 #define JNI_UTIL_H
 
-const char RUNTIME_EXC_CLASS[] = "java/lang/RuntimeException";
+static const char RUNTIME_EXC_CLASS[] = "java/lang/RuntimeException";
+static const char OOM_ERR_CLASS[] = "java/lang/OutOfMemoryError";
 
 #ifndef __has_attribute
     #define __has_attribute(x) 0

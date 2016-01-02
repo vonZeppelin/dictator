@@ -17,8 +17,9 @@
     [clojure.core.async :as async :refer [<! >! >!! alt! chan close! go go-loop thread timeout]]
     [dictator.util :refer [platform ->ValueHolder]])
   (:import
-    dictator.Native$VAD
-    java.io.ByteArrayOutputStream java.nio.ByteOrder
+    [dictator Native$VAD Native$MP3Enc]
+    java.io.ByteArrayOutputStream
+    java.nio.ByteOrder
     [javax.sound.sampled AudioFormat AudioInputStream AudioSystem DataLine$Info Mixer Mixer$Info TargetDataLine]))
 
 (def ^:private ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
@@ -84,7 +85,7 @@
 
 (defn aggregate-chunks [audio-channel pause-lenght]
   "Returns a channel with aduio frames aggregated into larger chunks
-   based on pauses in speech of greater than or equal to specified ms length"
+   based on pauses in speech of greater than or equal to specified ms length."
   (let [out-channel (chan)
         ;; reusable buffer of initially 50kB
         chunk (ByteArrayOutputStream. 50000)]
@@ -100,4 +101,17 @@
                                        (>! out-channel (.toByteArray chunk))
                                        (.reset chunk)
                                        (recur)))))
+    out-channel))
+
+(defn mp3-encode [audio-channel frame-rate brate]
+  "Returns a channel in which PCM audio chunks encoded into MP3 chunks."
+  (let [out-channel (chan)]
+    (go
+      (with-open [encoder (Native$MP3Enc. frame-rate brate)]
+        (loop []
+          (if-let [chunk (<! audio-channel)]
+            (do
+              (>! out-channel (.encode encoder chunk))
+              (recur))
+            (close! out-channel)))))
     out-channel))
