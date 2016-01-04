@@ -13,12 +13,15 @@ if (CMAKE_C_COMPILER_ID MATCHES "GNU|(Apple)?Clang")
         )
     endif()
 elseif (MSVC)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /arch:SSE2 /W4")
+    # Is 32-bit platform?
+    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /arch:SSE2")
+    endif()
 
     # Ugly way to have config.h on Win
     if (NOT EXISTS ${CMAKE_SOURCE_DIR}/lame/config.h)
-        file(COPY ${CMAKE_SOURCE_DIR}/lame/configMS.h
-            DESTINATION ${CMAKE_SOURCE_DIR}/lame/config.h
+        configure_file(${CMAKE_SOURCE_DIR}/lame/configMS.h ${CMAKE_SOURCE_DIR}/lame/config.h
+            COPYONLY
         )
     endif()
 else()
@@ -72,7 +75,7 @@ add_library(webrtc STATIC
     webrtc/webrtc/common_audio/vad/vad_sp.c
 )
 target_include_directories(webrtc
-    PRIVATE webrtc
+    PUBLIC webrtc
 )
 target_compile_definitions(webrtc
     PRIVATE ${WEBRTC_DEFS}
@@ -102,16 +105,17 @@ add_library(lame STATIC
     lame/libmp3lame/version.c
 )
 target_include_directories(lame
-    PRIVATE lame lame/include lame/libmp3lame lame/mpglib
+    PUBLIC lame/include
+    PRIVATE lame lame/libmp3lame lame/mpglib
 )
 target_compile_definitions(lame
-    PRIVATE HAVE_CONFIG_H
+    PRIVATE HAVE_CONFIG_H _CRT_SECURE_NO_WARNINGS
 )
 
 add_library(dictator SHARED
     audio.c
 )
 target_include_directories(dictator
-    PRIVATE webrtc lame/include ${JNI_INCLUDE_DIRS}
+    PRIVATE ${JNI_INCLUDE_DIRS}
 )
 target_link_libraries(dictator webrtc lame)

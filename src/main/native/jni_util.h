@@ -25,4 +25,4 @@ static const char OOM_ERR_CLASS[] = "java/lang/OutOfMemoryError";
     (*env)->DeleteLocalRef(env, clazz); \
 }
 
-#endif // JNI_UTIL_H
+#endif /* JNI_UTIL_H */
