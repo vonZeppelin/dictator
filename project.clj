@@ -5,6 +5,7 @@
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
   :dependencies [[org.clojure/clojure "1.7.0"]
                  [org.clojure/core.async "0.2.374"]
+                 [us.monoid.web/resty "0.3.2"]
                  [com.miglayout/miglayout-swing "5.0"]]
   :source-paths ["src/main/clojure"]
   :java-source-paths ["src/main/java"]
