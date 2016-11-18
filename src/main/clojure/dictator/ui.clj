@@ -14,40 +14,57 @@
 
 (ns dictator.ui
   (:require
-    [clojure.core.async :refer [<! go close!]]
-    [clojure.java.io :as io]
-    [dictator [util :refer [icon text ->ValueHolder]]
-              [audio :as audio]])
+    [clojure.core.async :refer [<! close! go-loop thread]]
+    [dictator [audio :as audio]
+              [engine :as engine]
+              [util :refer [icon text ->ValueHolder]]])
   (:import
     net.miginfocom.swing.MigLayout
-    [dictator Native Native$Aggressiveness]
-    [java.awt Color Insets]
-    [java.util EventObject Hashtable]
-    [javax.swing AbstractAction DefaultBoundedRangeModel DefaultComboBoxModel ImageIcon JCheckBox JComboBox JFrame
-                 JLabel JMenu JMenuBar JMenuItem JOptionPane JPanel JSeparator JSlider JTabbedPane JToggleButton]))
+    [dictator LCDPanel Native Native$Aggressiveness]
+    [java.awt Color Insets Point Rectangle Toolkit]
+    [java.awt.event KeyEvent MouseAdapter WindowFocusListener]
+    [javax.swing AbstractAction DefaultBoundedRangeModel DefaultComboBoxModel Icon JCheckBox JComboBox JFrame
+                 JLabel JMenu JMenuBar JMenuItem JOptionPane JPanel JSeparator JSlider JTabbedPane JToggleButton
+                 JWindow KeyStroke]
+    [javax.swing.event ListDataListener]))
 
 (def ^:private mixers-model (DefaultComboBoxModel.))
-(def ^:private sample-rates-model (DefaultBoundedRangeModel. 0 0 0 2))
+(def ^:private langs-model (DefaultComboBoxModel.))
+(def ^:private pause-model (DefaultBoundedRangeModel. 500 0 500 2500))
+(def ^:private engine-model (DefaultComboBoxModel. (to-array engine/engine-factories)))
+(def ^:private quality-model (DefaultComboBoxModel.
+                               (to-array [(->ValueHolder (text ::q.normal) :qnormal)
+                                          (->ValueHolder (text ::q.low) :qlow)
+                                          (->ValueHolder (text ::q.high) :qhigh)])))
 (def ^:private vad-mode-model (DefaultComboBoxModel.
-                                (into-array [(->ValueHolder (text ::vad.norm) Native$Aggressiveness/NORMAL)
-                                             (->ValueHolder (text ::vad.lb) Native$Aggressiveness/LOW_BITRATE)
-                                             (->ValueHolder (text ::vad.agg) Native$Aggressiveness/AGGRESSIVE)
-                                             (->ValueHolder (text ::vad.vagg) Native$Aggressiveness/VERY_AGGRESSIVE)])))
+                                (to-array [(->ValueHolder (text ::v.normal) Native$Aggressiveness/NORMAL)
+                                           (->ValueHolder (text ::v.lbrate) Native$Aggressiveness/LOW_BITRATE)
+                                           (->ValueHolder (text ::v.agg) Native$Aggressiveness/AGGRESSIVE)
+                                           (->ValueHolder (text ::v.vagg) Native$Aggressiveness/VERY_AGGRESSIVE)])))
 (def ^:private dictation-channel (atom nil))
 
 
 (defn- stop-dictation []
-  (if-let [ch @dictation-channel]
+  (when-let [ch @dictation-channel]
     (close! ch)))
 
 (defn- start-dictation []
-  (if-let [mixer (.getSelectedItem mixers-model)]
-    (let [sample-rates [8000 16000 32000] ;; TODO Refactor?
-          sample-rate (-> sample-rates-model .getValue sample-rates)
+  (when-let [mixer (.getSelectedItem mixers-model)]
+    (let [lang (-> langs-model .getSelectedItem .value)
+          pause (.getValue pause-model)
           vad-mode (-> vad-mode-model .getSelectedItem .value)
-          ch (audio/capture mixer sample-rate)]
-      (audio/filter-voice ch sample-rate vad-mode)
-      (reset! dictation-channel ch))))
+          quality (-> quality-model .getSelectedItem .value)
+          engine (-> engine-model .getSelectedItem (engine/create quality lang))
+          srate (engine/sample-rate engine)
+          raw-ch (audio/capture-sound mixer srate)
+          voice-ch (audio/filter-voice raw-ch srate vad-mode)
+          chunks-ch (audio/aggregate-chunks voice-ch pause)
+          text-ch (engine/recognize-speech chunks-ch engine)]
+      (reset! dictation-channel raw-ch)
+      (go-loop []
+        (when-let [text (<! text-ch)]
+          (println text)
+          (recur))))))
 
 (defn- build-menu [frame]
   "Builds a main menu of the app."
@@ -81,44 +98,119 @@
     (.setJMenuBar frame menu)))
 
 (defn- build-input-tab []
-  ""
-  (doto (JPanel. (MigLayout. "wrap 2" "[]rel[grow]" "[center]unrel[center]"))
-    (.add (JLabel. (text ::input.device)))
+  "Builds Input tab."
+  (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
+    (.add (JLabel. (text ::device)))
     (.add
       (doto (JComboBox. mixers-model)
         (.setPrototypeDisplayValue ""))
       "growx")
-    (.add (JLabel. (text ::sample.rate)))
+    (.add (JLabel. (text ::lang)))
     (.add
-      (doto (JSlider. sample-rates-model)
-        (.setMajorTickSpacing 1)
+      (doto (JComboBox. langs-model)
+        (.setPrototypeDisplayValue ""))
+      "growx")
+    (.add (JLabel. (text ::pause)))
+    (.add
+      (doto (JSlider. pause-model)
+        (.setLabelTable (java.util.Hashtable. {(int 500) (JLabel. (text ::sec 0.5) JLabel/CENTER)
+                                               (int 1500) (JLabel. (text ::sec 1.5) JLabel/CENTER)
+                                               (int 2500) (JLabel. (text ::sec 2.5) JLabel/CENTER)}))
+        (.setMinorTickSpacing 500)
+        (.setMajorTickSpacing 1000)
         (.setSnapToTicks true)
         (.setPaintLabels true)
-        (.setPaintTicks true)
-        (.setLabelTable (let [khz (text ::khz)
-                              labels {(int 0) (JLabel. (str 8 khz))
-                                      (int 1) (JLabel. (str 16 khz))
-                                      (int 2) (JLabel. (str 32 khz))}]
-                          (Hashtable. labels))))
+        (.setPaintTicks true))
       "growx")))
 
+;; TODO Handle multimonitor envs
+(defn- build-output-tab [frame]
+  "Builds Output tab."
+  (let [tkit (Toolkit/getDefaultToolkit)
+        xhair-icon (icon ::crosshair)
+        xhair-hotspot (Point.
+                        (quot (.getIconWidth xhair-icon) 2)
+                        (quot (.getIconHeight xhair-icon) 2))
+        xhair-cursor (.createCustomCursor tkit (.getImage xhair-icon) xhair-hotspot "xhair")
+        mouse-tracker (proxy [MouseAdapter] []
+                        (mouseClicked [evt]
+                          (println evt))
+                        (mouseMoved [evt]
+                          (let [veil (.getSource evt)
+                                cursor-pos (.getLocationOnScreen evt)
+                                cursor-x (.-x cursor-pos)
+                                cursor-y (.-y cursor-pos)]
+                          (thread
+                            (when-let [elem (Native/findElement veil cursor-x cursor-y)]
+                              (println elem)
+                              (.close elem))))))
+        find-action (proxy [AbstractAction] [nil (icon ::crosshair :large)]
+                      (actionPerformed [evt]
+                        (let [find-button (.getSource evt)]
+                          (when (.isSelected find-button)
+                            (let [veil (JWindow. frame)
+                                  root-pane (.getRootPane veil)
+                                  esc-key (KeyStroke/getKeyStroke KeyEvent/VK_ESCAPE 0)
+                                  window-closer (proxy [AbstractAction WindowFocusListener] []
+                                                  (windowGainedFocus [_])
+                                                  (windowLostFocus [evt]
+                                                    (.setSelected find-button false)
+                                                    (.dispose veil))
+                                                  (actionPerformed [evt]
+                                                    (.setSelected find-button false)
+                                                    (.dispose veil)))]
+                              (-> root-pane .getInputMap (.put esc-key "close-window"))
+                              (-> root-pane .getActionMap (.put "close-window" window-closer))
+                              (doto veil
+                                (.addMouseListener mouse-tracker)
+                                (.addMouseMotionListener mouse-tracker)
+                                (.addWindowFocusListener window-closer)
+                                (.setBackground (Color. 1.0 1.0 1.0 0.003))
+                                (.setAlwaysOnTop (.isAlwaysOnTopSupported veil))
+                                (.setBounds (-> tkit .getScreenSize Rectangle.))
+                                (.setCursor xhair-cursor)
+                                (.setVisible true)))))))]
+    (doto (JPanel. (MigLayout. "" "[]rel[grow]" "[]"))
+      (.add
+        (doto (JToggleButton. find-action)
+          (.setToolTipText (text ::find.tip))
+          (.setSelectedIcon
+            (reify Icon
+              (getIconHeight [_] 32)
+              (getIconWidth [_] 32)
+              (paintIcon [_ _ _ _ _]))))))))
+
 (defn- build-misc-tab [frame]
-  ""
-  (let [ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
+  "Builds Misc tab."
+  (let [labels-builder (fn [postfix items]
+                         (let [builder #(vector (int %1) (JLabel. (str %2 postfix) JLabel/CENTER))
+                               kvs (map-indexed builder items)]
+                           (java.util.Hashtable. (into {} kvs))))
+        ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
                              (actionPerformed [evt]
                                (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
                              (isEnabled []
                                (.isAlwaysOnTopSupported frame)))]
-    (doto (JPanel. (MigLayout. "wrap 2" "[]rel[grow]" "[center]unrel[center]"))
+    (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
       (.add (JCheckBox. ontop-action) "spanx 2")
+      (.add (JLabel. (text ::engine)))
+      (.add
+        (doto (JComboBox. engine-model)
+          (.setPrototypeDisplayValue ""))
+        "growx")
       (.add (JLabel. (text ::vad)))
       (.add
         (doto (JComboBox. vad-mode-model)
           (.setPrototypeDisplayValue ""))
+        "growx")
+      (.add (JLabel. (text ::quality)))
+      (.add
+        (doto (JComboBox. quality-model)
+          (.setPrototypeDisplayValue ""))
         "growx"))))
 
 (defn- build-controls [frame]
-  ""
+  "Builds UI controls of the main panel."
   (let [tabbed-pane (JTabbedPane. JTabbedPane/BOTTOM JTabbedPane/SCROLL_TAB_LAYOUT)
         rec-action (proxy [AbstractAction] [(text ::rec)]
                      (actionPerformed [evt]
@@ -141,11 +233,8 @@
       (.add (doto (JToggleButton. rec-action)
               (.setToolTipText (text ::rec.tip))
               (.setIcon (icon ::rec-off :large))
-              (.setSelectedIcon  (icon ::rec-on :large))))
-      (.add
-        (doto (JPanel.)
-          (.setBackground Color/BLACK))
-        "wmin 200,grow")
+              (.setSelectedIcon (icon ::rec-on :large))))
+      (.add (LCDPanel.) "wmin 200,grow")
       (.add (JLabel. (text ::settings)))
       (.add (JSeparator.) "growx")
       (.add
@@ -162,18 +251,30 @@
         (doto tabbed-pane
           (.setVisible false)
           (.add (text ::tab.input) (build-input-tab))
-          (.add (text ::tab.output) (JLabel. "TBD"))
+          (.add (text ::tab.output) (build-output-tab frame))
           (.add (text ::tab.misc) (build-misc-tab frame)))
         "growx,span 2,hidemode 2"))))
 
 (defn show-app []
   "Initializes a main frame and controls of the app, wires them together and shows the UI."
-  (doto (JFrame. (text ::app.title))
-    (build-menu)
-    (build-controls)
-    (.setIconImages [(.getImage (icon ::darth)) (.getImage (icon ::darth :large))])
-    (.setDefaultCloseOperation JFrame/DISPOSE_ON_CLOSE)
-    (.setResizable false)
-    (.pack)
-    (.setLocationRelativeTo nil)
-    (.setVisible true)))
+  (letfn [(populate-langs []
+            (.removeAllElements langs-model)
+            (doseq [lang (-> engine-model .getSelectedItem .supports)]
+              (.addElement langs-model (->ValueHolder (.getDisplayLanguage lang) lang))))]
+    (.addListDataListener
+      engine-model
+      (reify ListDataListener
+        (intervalAdded [_ _])
+        (intervalRemoved [_ _])
+        (contentsChanged [_ _]
+          (populate-langs))))
+    (populate-langs)
+    (doto (JFrame. (text ::app.title))
+      (build-menu)
+      (build-controls)
+      (.setIconImages [(.getImage (icon ::darth)) (.getImage (icon ::darth :large))])
+      (.setDefaultCloseOperation JFrame/DISPOSE_ON_CLOSE)
+      (.setResizable false)
+      (.pack)
+      (.setLocationRelativeTo nil)
+      (.setVisible true))))

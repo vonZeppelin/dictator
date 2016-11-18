@@ -9,6 +9,14 @@ extern "C" {
 #endif
 /*
  * Class:     dictator_Native
+ * Method:    findElement
+ * Signature: (Ljava/awt/Window;II)Ldictator/Native/UIElem;
+ */
+JNIEXPORT jobject JNICALL Java_dictator_Native_findElement
+  (JNIEnv *, jclass, jobject, jint, jint);
+
+/*
+ * Class:     dictator_Native
  * Method:    createVAD
  * Signature: (I)J
  */
@@ -53,6 +61,14 @@ JNIEXPORT jbyteArray JNICALL Java_dictator_Native_encodeLAME
  * Signature: (J)V
  */
 JNIEXPORT void JNICALL Java_dictator_Native_freeLAME
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     dictator_Native
+ * Method:    freeElement
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_dictator_Native_freeElement
   (JNIEnv *, jclass, jlong);
 
 #ifdef __cplusplus

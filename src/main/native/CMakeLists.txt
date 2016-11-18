@@ -3,34 +3,38 @@ cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 project(Dictator C)
 
 find_package(JNI REQUIRED)
-if (CMAKE_C_COMPILER_ID MATCHES "GNU|(Apple)?Clang")
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -O3 -msse2 -pipe -ffast-math -funroll-loops -fvisibility=hidden")
+if (UNIX)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wpedantic -pipe -msse2 -ffast-math -funroll-loops -flto -fvisibility=hidden")
+    set(WEBRTC_DEFS WEBRTC_POSIX)
 
-    # Ugly way to have config.h on Mac
+    # Ugly way to have LAME config.h
     if (NOT EXISTS ${CMAKE_SOURCE_DIR}/lame/config.h)
         execute_process(COMMAND ./configure --disable-decoder
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/lame
         )
     endif()
+    if (APPLE)
+        find_library(JNF_LIB JavaNativeFoundation PATH_SUFFIXES JavaVM.framework/Frameworks)
+        find_library(COCOA_LIB Cocoa)
+        set(EXTRA_LIBS ${JNF_LIB} ${COCOA_LIB})
+        set(DICTATOR_SRC ui_macos.m)
+        # set(CMAKE_OSX_DEPLOYMENT_TARGET 10.7)
+    endif()
 elseif (MSVC)
     # Is 32-bit platform?
-    if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+    if (CMAKE_SIZEOF_VOID_P EQUAL 4)
         set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /arch:SSE2")
     endif()
+    set(WEBRTC_DEFS WEBRTC_WIN)
 
-    # Ugly way to have config.h on Win
+    # Ugly way to have LAME config.h
     if (NOT EXISTS ${CMAKE_SOURCE_DIR}/lame/config.h)
         configure_file(${CMAKE_SOURCE_DIR}/lame/configMS.h ${CMAKE_SOURCE_DIR}/lame/config.h
             COPYONLY
         )
     endif()
 else()
-    message(FATAL_ERROR "Unknown compiler!")
-endif()
-if (UNIX)
-    set(WEBRTC_DEFS WEBRTC_POSIX)
-else()
-    set(WEBRTC_DEFS WEBRTC_WIN)
+    message(FATAL_ERROR "Unsupported target platform")
 endif()
 
 # Subset of the WebRTC project with VAD module
@@ -114,8 +118,11 @@ target_compile_definitions(lame
 
 add_library(dictator SHARED
     audio.c
+    ${DICTATOR_SRC}
 )
 target_include_directories(dictator
-    PRIVATE ${JNI_INCLUDE_DIRS}
+    PRIVATE ${JNI_INCLUDE_DIRS} ${EXTRA_LIB}
 )
-target_link_libraries(dictator webrtc lame)
+target_link_libraries(dictator
+    PRIVATE webrtc lame ${EXTRA_LIBS}
+)

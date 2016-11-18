@@ -25,7 +25,7 @@
 ;; icon size -> icon resource name templates
 (def ^:private icon-sizes {:small "%s.png" :large "%s.32.png"})
 
-(defonce platform (let [os (condp #(.startsWith %2 %1) (System/getProperty "os.name")
+(defonce platform (let [os (condp #(string/starts-with? %2 %1) (System/getProperty "os.name")
                              "Windows" :win
                              "Mac" :mac
                              "Darwin" :mac
@@ -41,17 +41,16 @@
   Object
   (toString [_] name))
 
-(defn text
-  "Returns a string resource identified by a key. A ResourceBundle to query is specified
-   either explicitly or calculated from the key's namespace."
-  ([key]
-    (let [bundle (-> key namespace munge ResourceBundle/getBundle)]
-      (text key bundle)))
-  ([key bundle]
-    (let [key (name key)]
-      (try
-        (.getString bundle key)
-        (catch MissingResourceException e key)))))
+(defn text [key & args]
+  "Returns a string resource identified by a key. A ResourceBundle to query is calculated from the key's namespace."
+  (let [bundle (-> key namespace munge ResourceBundle/getBundle)
+        key (name key)
+        str (try
+              (.getString bundle key)
+              (catch MissingResourceException e key))]
+    (if (empty? args)
+      str
+      (apply format str args))))
 
 (defn icon
   "Returns an ImageIcon resource of a specifed size (optional, defaults to ':small') and identified by a key.

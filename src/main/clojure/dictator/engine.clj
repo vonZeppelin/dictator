@@ -30,69 +30,86 @@
     ""
     (str s)))
 
-(def supported-langs #{en ru})
+(defprotocol SRFactory
+  "A speech recognition engine factory."
+  (supports [this] "Returns a list of supported locales.")
+  (create [this quality lang] "Given a locale and a quality specifier returns an SR engine."))
 
 (defprotocol SR
   "A generic speech recognition technology."
-  (as-text [this sample-rate audio] "Turns provided PCM audio chunk into text."))
+  (sample-rate [this] "Required PCM audio sample rate.")
+  (as-text [this audio] "Turns provided PCM audio chunk into text."))
 
-(deftype WitAI [encoder resty]
-  SR
-  (as-text [_ _ audio]
-    (let [api-url "https://api.wit.ai/speech?v=20160110&n=0"
-          content (->> audio (.encode encoder) (Content. "audio/mpeg3"))
-          result (.json resty api-url content)]
-      (if (.status result 200)
-        (-> result (.get "_text") to-str)
-        (throw (ex-info "Speech recongnition failed" {:code (-> result .http .getResponseCode)
-                                                      :msg (-> result .http .getResponseMessage)})))))
-  java.lang.AutoCloseable
-  (close [_]
-    (.close encoder)))
+(deftype WitAI []
+  SRFactory
+    (supports [_] [en ru])
+    (create [_ quality lang]
+      (let [params {:qlow [8000 64]
+                    :qnormal [16000 128]
+                    :qhigh [32000 192]}
+            [srate brate] (quality params)
+            api-url "https://api.wit.ai/speech?v=20160110&n=0"
+            wit-tokens {en "WLHZ3HZPSLBUOR2SEOAX5PMDSKKYNFKU"
+                        ru "6K6G5BQWQSCRHT23CVL6ECBGOHER2CI3"}
+            auth-header (str "Bearer " (wit-tokens lang))
+            resty (doto (Resty. resty-options)
+                    (.withHeader "Authorization" auth-header))
+            encoder (Native$MP3Enc. srate brate)]
+        (reify
+          SR
+            (sample-rate [_] srate)
+            (as-text [_ audio]
+              (let [content (->> audio (.encode encoder) (Content. "audio/mpeg3"))
+                    result (.json resty api-url content)]
+                (if (.status result 200)
+                  (-> result (.get "_text") to-str)
+                  (throw (ex-info "Speech recongnition failed" {:code (-> result .http .getResponseCode)
+                                                                :msg (-> result .http .getResponseMessage)})))))
+          java.lang.AutoCloseable
+            (close [_] (.close encoder)))))
+  java.lang.Object
+    (toString [_] "WitAI"))
 
-;; currently supports 16kHz, 16-bit, mono, signed PCM audio only
-(deftype ApiAI [resty request-json]
-  SR
-  (as-text [_ _ audio]
-    (let [api-url "https://api.api.ai/v1/query?v=20160110"
-          form-data [(Resty/data "request" (Resty/content request-json))
-                     (Resty/data "voiceData" (Content. "audio/wav" audio))]
-          result (.json resty api-url (-> form-data into-array Resty/form))]
-      (if (-> result (.get "status.code") (= 200))
-        (-> result (.get "result.resolvedQuery") to-str)
-        (throw (ex-info "Speech recongnition failed" {:code (-> result (.get "status.code"))
-                                                      :msg (-> result (.get "status.errorDetails"))})))))
-  java.lang.AutoCloseable
-  (close [_]))
+(deftype ApiAI []
+  SRFactory
+    (supports [_] [en ru])
+    (create [_ quality lang]
+      (let [api-url "https://api.api.ai/v1/query?v=20160110"
+            auth-header "Bearer 4ac5e5727ad9432f8ca167f3a92b55e1"
+            subscription-header "18bd8281-bf78-4d70-b170-c43f0d17ea80"
+            request-content (Resty/content (JSONObject. ^Map {"lang" (.getLanguage lang)
+                                                              "sessionId" (str (System/currentTimeMillis))}))
+            resty (doto (Resty. resty-options)
+                    (.withHeader "Authorization" auth-header)
+                    (.withHeader "ocp-apim-subscription-key" subscription-header))]
+        ;; currently supports 16kHz 16-bit mono signed PCM audio only
+        (reify
+          SR
+            (sample-rate [_] 16000)
+            (as-text [_ audio]
+              (let [form-data [(Resty/data "request" request-content)
+                               (Resty/data "voiceData" (Content. "audio/wav" audio))]
+                    result (.json resty api-url (-> form-data into-array Resty/form))]
+                (if (-> result (.get "status.code") (= 200))
+                  (-> result (.get "result.resolvedQuery") to-str)
+                  (throw (ex-info "Speech recongnition failed" {:code (.get result "status.code")
+                                                                :msg (.get result "status.errorDetails")})))))
+          java.lang.AutoCloseable
+            (close [_]))))
+  java.lang.Object
+    (toString [_] "ApiAI"))
 
-(defn new-witai [sample-rate brate lang]
-  (let [wit-tokens {en "WLHZ3HZPSLBUOR2SEOAX5PMDSKKYNFKU"
-                    ru "6K6G5BQWQSCRHT23CVL6ECBGOHER2CI3"}
-        auth-header (str "Bearer " (wit-tokens lang))
-        resty (doto (Resty. resty-options)
-                (.withHeader "Authorization" auth-header))
-        encoder (Native$MP3Enc. sample-rate brate)]
-    (->WitAI encoder resty)))
+(defonce engine-factories [(WitAI.) (ApiAI.)])
 
-(defn new-apiai [lang]
-  (let [auth-header "Bearer 4ac5e5727ad9432f8ca167f3a92b55e1"
-        subscription-header "18bd8281-bf78-4d70-b170-c43f0d17ea80"
-        request-data {"lang" (.getLanguage lang)
-                      "sessionId" (str (System/currentTimeMillis))}
-        resty (doto (Resty. resty-options)
-                (.withHeader "Authorization" auth-header)
-                (.withHeader "ocp-apim-subscription-key" subscription-header))]
-    (->ApiAI resty (JSONObject. ^Map request-data))))
-
-(defn recognize-speech [audio-channel sample-rate brate lang]
+(defn recognize-speech [audio-channel engine]
   "Returns a channel with recongnized speech."
   (let [out-channel (chan)]
     (go
-      (with-open [sr (new-witai sample-rate brate lang)]
+      (with-open [engine engine]
         (loop []
           (if-let [chunk (<! audio-channel)]
             (do
-              (>! out-channel (as-text sr sample-rate chunk))
+              (>! out-channel (as-text engine chunk))
               (recur))
             (close! out-channel)))))
     out-channel))
