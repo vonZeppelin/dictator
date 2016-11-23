@@ -66,8 +66,9 @@
           (println text)
           (recur))))))
 
-(defn- build-menu [frame]
+(defn- build-menu
   "Builds a main menu of the app."
+  [frame]
   (let [menu (JMenuBar.)
         file-menu (JMenu. (text ::menu.file))
         help-menu (JMenu. (text ::menu.help))
@@ -97,8 +98,9 @@
       (.setVisible false))
     (.setJMenuBar frame menu)))
 
-(defn- build-input-tab []
+(defn- build-input-tab
   "Builds Input tab."
+  []
   (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
     (.add (JLabel. (text ::device)))
     (.add
@@ -124,8 +126,9 @@
       "growx")))
 
 ;; TODO Handle multimonitor envs
-(defn- build-output-tab [frame]
+(defn- build-output-tab
   "Builds Output tab."
+  [frame]
   (let [tkit (Toolkit/getDefaultToolkit)
         xhair-icon (icon ::crosshair)
         xhair-hotspot (Point.
@@ -180,17 +183,14 @@
               (getIconWidth [_] 32)
               (paintIcon [_ _ _ _ _]))))))))
 
-(defn- build-misc-tab [frame]
+(defn- build-misc-tab
   "Builds Misc tab."
-  (let [labels-builder (fn [postfix items]
-                         (let [builder #(vector (int %1) (JLabel. (str %2 postfix) JLabel/CENTER))
-                               kvs (map-indexed builder items)]
-                           (java.util.Hashtable. (into {} kvs))))
-        ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
-                             (actionPerformed [evt]
-                               (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
-                             (isEnabled []
-                               (.isAlwaysOnTopSupported frame)))]
+  [frame]
+  (let [ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
+                       (actionPerformed [evt]
+                         (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
+                       (isEnabled []
+                         (.isAlwaysOnTopSupported frame)))]
     (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
       (.add (JCheckBox. ontop-action) "spanx 2")
       (.add (JLabel. (text ::engine)))
@@ -209,8 +209,9 @@
           (.setPrototypeDisplayValue ""))
         "growx"))))
 
-(defn- build-controls [frame]
+(defn- build-controls
   "Builds UI controls of the main panel."
+  [frame]
   (let [tabbed-pane (JTabbedPane. JTabbedPane/BOTTOM JTabbedPane/SCROLL_TAB_LAYOUT)
         rec-action (proxy [AbstractAction] [(text ::rec)]
                      (actionPerformed [evt]
@@ -255,8 +256,9 @@
           (.add (text ::tab.misc) (build-misc-tab frame)))
         "growx,span 2,hidemode 2"))))
 
-(defn show-app []
+(defn show-app
   "Initializes a main frame and controls of the app, wires them together and shows the UI."
+  []
   (letfn [(populate-langs []
             (.removeAllElements langs-model)
             (doseq [lang (-> engine-model .getSelectedItem .supports)]

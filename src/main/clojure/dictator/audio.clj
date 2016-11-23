@@ -28,8 +28,9 @@
 ;; 30ms frames to make WebRTC VAD happy
 (def ^:private ^:const frame-length 0.03)
 
-(defn get-mixers []
+(defn get-mixers
   "Returns a sequence of mixers supporting audio capturing. A mixer is wrapped into a ValueHolder instance."
+  []
   (let [is-win? (= (:os platform) :win)
         ;; let's use the max supported sample rate to filter out mixers
         test-format (AudioFormat. 32000 bit-depth 1 true big-endian?)
@@ -46,8 +47,9 @@
                  (->ValueHolder fixed-name info)))]
     (->> (AudioSystem/getMixerInfo) (filter can-capture?) (map wrap))))
 
-(defn capture-sound [mixer-info sample-rate]
+(defn capture-sound
   "Returns a channel of captured voice frames."
+  [mixer-info sample-rate]
   (let [out-channel (chan)]
     (thread
       (let [frmt (AudioFormat. sample-rate bit-depth 1 true big-endian?)
@@ -64,8 +66,9 @@
             (.flush line))))
     out-channel))
 
-(defn filter-voice [audio-channel frame-rate vad-mode]
+(defn filter-voice
   "Returns a channel of frames with actual voice."
+  [audio-channel frame-rate vad-mode]
   (let [out-channel (chan)
         ;; let's do voice / no voice decision based on 5 consecutive frames
         parted-channel (async/partition 5 audio-channel)]
@@ -83,9 +86,10 @@
               (close! out-channel))))))
     out-channel))
 
-(defn aggregate-chunks [audio-channel pause-lenght]
+(defn aggregate-chunks
   "Returns a channel with aduio frames aggregated into larger chunks
    based on pauses in speech of greater than or equal to specified ms length."
+  [audio-channel pause-lenght]
   (let [out-channel (chan)
         ;; reusable buffer of initially 50kB
         chunk (ByteArrayOutputStream. 50000)]

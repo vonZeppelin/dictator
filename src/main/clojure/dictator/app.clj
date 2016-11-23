@@ -20,8 +20,9 @@
     [javax.swing SwingUtilities UIManager])
   (:gen-class))
 
-(defn -main [& args]
+(defn -main
   "The app entry point."
+  [& args]
   (init-native-code)
   (UIManager/setLookAndFeel (UIManager/getSystemLookAndFeelClassName))
   (SwingUtilities/invokeLater show-app))

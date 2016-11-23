@@ -41,8 +41,9 @@
   Object
   (toString [_] name))
 
-(defn text [key & args]
+(defn text
   "Returns a string resource identified by a key. A ResourceBundle to query is calculated from the key's namespace."
+  [key & args]
   (let [bundle (-> key namespace munge ResourceBundle/getBundle)
         key (name key)
         str (try
@@ -63,14 +64,15 @@
           icon (-> icon-path io/resource ImageIcon.)]
       icon)))
 
-(defn init-native-code []
- "Unpacks the native helper lib to the temp directory and loads it."
- (let [lib-attrs (make-array java.nio.file.attribute.FileAttribute 0)
-       lib-name (System/mapLibraryName "dictator")
-       lib-res (if (:is64 platform)
-                 (string/replace-first lib-name #"\.(?=\w+$)" "64.")
-                 lib-name)
-       lib-file (.toFile (Files/createTempFile nil lib-name lib-attrs))]
-   (with-open [lib (-> lib-res io/resource io/input-stream)]
-     (io/copy lib lib-file)
-     (Native/loadLibrary lib-file))))
+(defn init-native-code
+  "Unpacks the native helper lib to the temp directory and loads it."
+  []
+  (let [lib-attrs (make-array java.nio.file.attribute.FileAttribute 0)
+        lib-name (System/mapLibraryName "dictator")
+        lib-res (if (:is64 platform)
+                  (string/replace-first lib-name #"\.(?=\w+$)" "64.")
+                  lib-name)
+        lib-file (.toFile (Files/createTempFile nil lib-name lib-attrs))]
+    (with-open [lib (-> lib-res io/resource io/input-stream)]
+      (io/copy lib lib-file)
+      (Native/loadLibrary lib-file))))

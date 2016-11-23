@@ -101,8 +101,9 @@
 
 (defonce engine-factories [(WitAI.) (ApiAI.)])
 
-(defn recognize-speech [audio-channel engine]
+(defn recognize-speech
   "Returns a channel with recongnized speech."
+  [audio-channel engine]
   (let [out-channel (chan)]
     (go
       (with-open [engine engine]
