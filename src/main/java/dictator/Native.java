@@ -16,13 +16,10 @@
 
 package dictator;
 
-import java.awt.Rectangle;
-import java.awt.Window;
+import java.awt.*;
 
 import java.io.File;
 import java.io.IOException;
-
-import java.util.Objects;
 
 /**
  * The <code>Native</code> class provides access to platform specific
@@ -42,7 +39,7 @@ public final class Native {
      * Voice activity detector based on the WebRTC project submodule.
      */
     public static final class VAD implements AutoCloseable {
-        private final long ptr;
+        private volatile Long ptr;
 
         public VAD(Aggressiveness aggressiveness) {
             ptr = createVAD(aggressiveness.ordinal());
@@ -53,8 +50,11 @@ public final class Native {
         }
 
         @Override
-        public void close() {
-            freeVAD(ptr);
+        public synchronized void close() {
+            if (ptr != null) {
+                freeVAD(ptr);
+                ptr = null;
+            }
         }
     }
 
@@ -62,7 +62,7 @@ public final class Native {
      * MP3 encoder based on the LAME library.
      */
     public static final class MP3Enc implements AutoCloseable {
-        private final long ptr;
+        private volatile Long ptr;
 
         public MP3Enc(int sampleRate, int brate) {
             ptr = createLAME(sampleRate, brate);
@@ -73,8 +73,11 @@ public final class Native {
         }
 
         @Override
-        public void close() {
-            freeLAME(ptr);
+        public synchronized void close() {
+            if (ptr != null) {
+                freeLAME(ptr);
+                ptr = null;
+            }
         }
     }
 
@@ -83,46 +86,41 @@ public final class Native {
      */
     public static final class UIElem implements AutoCloseable {
         public final int pid;
+        public final String appTitle;
         public final Rectangle area;
 
-        private final long ptr;
+        private volatile Long ptr;
 
-        public UIElem(long ptr, int pid, Rectangle area) {
-            this.ptr = ptr;
+        public UIElem(long ptr, int pid, String appTitle, Rectangle area) {
             this.pid = pid;
+            this.appTitle = appTitle;
             this.area = area;
+            this.ptr = ptr;
         }
 
         @Override
-        public void close() {
-            freeElement(ptr);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (obj == this) {
-                return true;
+        public synchronized void close() {
+            if (ptr != null) {
+                freeElement(ptr);
+                ptr = null;
             }
-            if (obj instanceof UIElem == false) {
-                return false;
-            }
-
-            UIElem anotherElem = (UIElem) obj;
-            return pid == anotherElem.pid
-                && Objects.equals(area, anotherElem.area);
         }
 
         @Override
-        public int hashCode() {
-            return Objects.hash(pid, area);
+        protected void finalize() {
+          if (ptr != null) {
+            System.out.println("Error!!!");
+          }
         }
+    }
+
+    public static UIElem findElement(Window veil, Point cursor) {
+        return findElement(veil, cursor.x, cursor.y);
     }
 
     public static void loadLibrary(File path) throws IOException {
         System.load(path.getCanonicalPath());
     }
-
-    public static native UIElem findElement(Window veil, int cursorX, int cursorY);
 
     private static native long createVAD(int aggressiveness);
     private static native void freeVAD(long handle);
@@ -130,6 +128,7 @@ public final class Native {
     private static native long createLAME(int sampleRate, int brate);
     private static native byte[] encodeLAME(long handle, byte[] audio);
     private static native void freeLAME(long handle);
+    private static native UIElem findElement(Window veil, int cursorX, int cursorY);
     private static native void freeElement(long ptr);
 
     private Native() {}

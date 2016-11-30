@@ -17,7 +17,7 @@ static JNF_CLASS_CACHE(RECTANGLE, "java/awt/Rectangle");
 static JNF_CTOR_CACHE(RECTANGLE_ctor, RECTANGLE, "(IIII)V");
 
 static JNF_CLASS_CACHE(UIELEM, "dictator/Native$UIElem");
-static JNF_CTOR_CACHE(UIELEM_ctor, UIELEM, "(JILjava/awt/Rectangle;)V");
+static JNF_CTOR_CACHE(UIELEM_ctor, UIELEM, "(JILjava/lang/String;Ljava/awt/Rectangle;)V");
 
 JNIEXPORT jobject JNICALL Java_dictator_Native_findElement(JNIEnv *env, jclass clazz,
                                                            jobject veil, jint cursorX, jint cursorY) {
@@ -72,8 +72,11 @@ JNF_COCOA_ENTER(env)
             AXValueGetValue(value, kAXValueCGSizeType, &elemSize);
             CFRelease(value);
 
-            jobject rect = JNFNewObject(env, RECTANGLE_ctor, elemPos.x, elemPos.y, elemSize.width, elemSize.height);
-            return JNFNewObject(env, UIELEM_ctor, ptr_to_jlong(elem), ownerPid, rect);
+            NSRunningApplication *ownerApp = [NSRunningApplication runningApplicationWithProcessIdentifier:ownerPid];
+            jstring ownerTitle = JNFNSToJavaString(env, ownerApp.localizedName);
+            jobject rect = JNFNewObject(env, RECTANGLE_ctor, (jint) elemPos.x, (jint) elemPos.y,
+                                        (jint) elemSize.width, (jint) elemSize.height);
+            return JNFNewObject(env, UIELEM_ctor, ptr_to_jlong(elem), ownerPid, ownerTitle, rect);
         }
     }
 JNF_COCOA_EXIT(env)

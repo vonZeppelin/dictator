@@ -1,8 +1,8 @@
+.idea/
 .settings/
 bin/
-CMakeFiles/
 target/
 .*repl*
 .classpath
 .project
-CMakeCache.txt
+*.iml

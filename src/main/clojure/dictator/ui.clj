@@ -14,18 +14,18 @@
 
 (ns dictator.ui
   (:require
-    [clojure.core.async :refer [<! close! go-loop thread]]
+    [clojure.core.async :refer [<! close! go-loop]]
     [dictator [audio :as audio]
               [engine :as engine]
               [util :refer [icon text ->ValueHolder]]])
   (:import
     net.miginfocom.swing.MigLayout
     [dictator LCDPanel Native Native$Aggressiveness]
-    [java.awt Color Insets Point Rectangle Toolkit]
-    [java.awt.event KeyEvent MouseAdapter WindowFocusListener]
+    [java.awt BasicStroke BorderLayout Color Insets Point Rectangle RenderingHints Toolkit]
+    [java.awt.event KeyEvent MouseAdapter WindowAdapter]
     [javax.swing AbstractAction DefaultBoundedRangeModel DefaultComboBoxModel Icon JCheckBox JComboBox JFrame
                  JLabel JMenu JMenuBar JMenuItem JOptionPane JPanel JSeparator JSlider JTabbedPane JToggleButton
-                 JWindow KeyStroke]
+                 JWindow KeyStroke SwingWorker]
     [javax.swing.event ListDataListener]))
 
 (def ^:private mixers-model (DefaultComboBoxModel.))
@@ -42,6 +42,7 @@
                                            (->ValueHolder (text ::v.agg) Native$Aggressiveness/AGGRESSIVE)
                                            (->ValueHolder (text ::v.vagg) Native$Aggressiveness/VERY_AGGRESSIVE)])))
 (def ^:private dictation-channel (atom nil))
+(def ^:private selected-element (atom nil))
 
 
 (defn- stop-dictation []
@@ -77,7 +78,12 @@
                         (.dispose frame)))
         options-action (proxy [AbstractAction] [(text ::menu.options) (icon ::options)]
                          (actionPerformed [evt]
-                           (println evt)))
+                           (as-> frame $
+                             (.getContentPane $)
+                             (.getComponents $)
+                             (filter #(instance? JTabbedPane %) $)
+                             (first $)
+                             (.setSelectedIndex $ 2))))
         about-action (proxy [AbstractAction] [(text ::menu.about) (icon ::about)]
                        (actionPerformed [evt]
                          (JOptionPane/showMessageDialog
@@ -135,45 +141,85 @@
                         (quot (.getIconWidth xhair-icon) 2)
                         (quot (.getIconHeight xhair-icon) 2))
         xhair-cursor (.createCustomCursor tkit (.getImage xhair-icon) xhair-hotspot "xhair")
+        pid-label (JLabel.)
+        app-label (JLabel.)
+        reset-labels (fn []
+                       (doseq [lbl [pid-label app-label]]
+                         (.setText lbl "")))
+        swapper (fn [old-elem new-elem]
+                  (some-> old-elem .close)
+                  new-elem)
         mouse-tracker (proxy [MouseAdapter] []
                         (mouseClicked [evt]
-                          (println evt))
+                          (-> evt .getSource .dispose))
                         (mouseMoved [evt]
                           (let [veil (.getSource evt)
-                                cursor-pos (.getLocationOnScreen evt)
-                                cursor-x (.-x cursor-pos)
-                                cursor-y (.-y cursor-pos)]
-                          (thread
-                            (when-let [elem (Native/findElement veil cursor-x cursor-y)]
-                              (println elem)
-                              (.close elem))))))
+                                cursor-pos (.getLocationOnScreen evt)]
+                            (.execute (proxy [SwingWorker] []
+                                        (doInBackground []
+                                          (swap! selected-element swapper (Native/findElement veil cursor-pos)))
+                                        (done []
+                                          (if-let [elem (.get this)]
+                                            (do
+                                              (->> elem .-pid str (.setText pid-label))
+                                              (->> elem .-appTitle str (.setText app-label)))
+                                            (reset-labels))
+                                            ;; OK skip tree locking when in Swing EDT
+                                            (-> veil .getContentPane (.getComponent 0) .repaint)))))))
         find-action (proxy [AbstractAction] [nil (icon ::crosshair :large)]
                       (actionPerformed [evt]
                         (let [find-button (.getSource evt)]
                           (when (.isSelected find-button)
-                            (let [veil (JWindow. frame)
-                                  root-pane (.getRootPane veil)
-                                  esc-key (KeyStroke/getKeyStroke KeyEvent/VK_ESCAPE 0)
-                                  window-closer (proxy [AbstractAction WindowFocusListener] []
-                                                  (windowGainedFocus [_])
-                                                  (windowLostFocus [evt]
-                                                    (.setSelected find-button false)
-                                                    (.dispose veil))
+                            (reset-labels)
+                            (swap! selected-element swapper nil)
+                            (let [esc-key (KeyStroke/getKeyStroke KeyEvent/VK_ESCAPE 0)
+                                  dash-stroke (BasicStroke.
+                                                2.0
+                                                BasicStroke/CAP_BUTT
+                                                BasicStroke/JOIN_MITER
+                                                5.0
+                                                (float-array [5.0])
+                                                0.0)
+                                  veil (JWindow. frame)
+                                  canvas (proxy [JPanel] [nil]
+                                           (paintComponent [g]
+                                             (proxy-super paintComponent g)
+                                             (when-let [elem @selected-element]
+                                               (let [area (.-area elem)]
+                                                 (doto (.create g)
+                                                   (.setColor Color/RED)
+                                                   (.setStroke dash-stroke)
+                                                   (.setRenderingHint
+                                                      RenderingHints/KEY_ANTIALIASING
+                                                      RenderingHints/VALUE_ANTIALIAS_ON)
+                                                   (.drawRect
+                                                     (.-x area)
+                                                     (.-y area)
+                                                     (.-width area)
+                                                     (.-height area))
+                                                   (.dispose))))))
+                                  window-listener (proxy [WindowAdapter] []
+                                                    (windowClosed [evt]
+                                                      (.setSelected find-button false)))
+                                  window-closer (proxy [AbstractAction] []
                                                   (actionPerformed [evt]
-                                                    (.setSelected find-button false)
-                                                    (.dispose veil)))]
+                                                    (reset-labels)
+                                                    (.dispose veil)))
+                                  root-pane (.getRootPane veil)]
                               (-> root-pane .getInputMap (.put esc-key "close-window"))
                               (-> root-pane .getActionMap (.put "close-window" window-closer))
+                              (.setOpaque canvas false)
                               (doto veil
+                                (.add canvas BorderLayout/CENTER)
                                 (.addMouseListener mouse-tracker)
                                 (.addMouseMotionListener mouse-tracker)
-                                (.addWindowFocusListener window-closer)
-                                (.setBackground (Color. 1.0 1.0 1.0 0.003))
+                                (.addWindowListener window-listener)
+                                (.setBackground (Color. 1.0 1.0 1.0 0.001))
                                 (.setAlwaysOnTop (.isAlwaysOnTopSupported veil))
                                 (.setBounds (-> tkit .getScreenSize Rectangle.))
                                 (.setCursor xhair-cursor)
                                 (.setVisible true)))))))]
-    (doto (JPanel. (MigLayout. "" "[]rel[grow]" "[]"))
+    (doto (JPanel. (MigLayout. "wrap 3" "[]25[]rel[grow]" "[]rel[]"))
       (.add
         (doto (JToggleButton. find-action)
           (.setToolTipText (text ::find.tip))
@@ -181,12 +227,17 @@
             (reify Icon
               (getIconHeight [_] 32)
               (getIconWidth [_] 32)
-              (paintIcon [_ _ _ _ _]))))))))
+              (paintIcon [_ _ _ _ _]))))
+        "spany,aligny top")
+      (.add (JLabel. (text ::pid)))
+      (.add pid-label)
+      (.add (JLabel. (text ::title)))
+      (.add app-label))))
 
 (defn- build-misc-tab
   "Builds Misc tab."
   [frame]
-  (let [ontop-action (proxy [AbstractAction] [(text ::always.ontop)]
+  (let [ontop-action (proxy [AbstractAction] [(text ::ontop)]
                        (actionPerformed [evt]
                          (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
                        (isEnabled []
