@@ -56,9 +56,9 @@
           vad-mode (-> vad-mode-model .getSelectedItem .value)
           quality (-> quality-model .getSelectedItem .value)
           engine (-> engine-model .getSelectedItem (engine/create quality lang))
-          srate (engine/sample-rate engine)
-          raw-ch (audio/capture-sound mixer srate)
-          voice-ch (audio/filter-voice raw-ch srate vad-mode)
+          audio-format (engine/audio-format engine)
+          raw-ch (audio/capture-sound mixer audio-format)
+          voice-ch (audio/filter-voice raw-ch audio-format vad-mode)
           chunks-ch (audio/aggregate-chunks voice-ch pause)
           text-ch (engine/recognize-speech chunks-ch engine)]
       (reset! dictation-channel raw-ch)
@@ -138,8 +138,8 @@
   (let [tkit (Toolkit/getDefaultToolkit)
         xhair-icon (icon ::crosshair)
         xhair-hotspot (Point.
-                        (quot (.getIconWidth xhair-icon) 2)
-                        (quot (.getIconHeight xhair-icon) 2))
+                        (/ (.getIconWidth xhair-icon) 2)
+                        (/ (.getIconHeight xhair-icon) 2))
         xhair-cursor (.createCustomCursor tkit (.getImage xhair-icon) xhair-hotspot "xhair")
         pid-label (JLabel.)
         app-label (JLabel.)
@@ -165,7 +165,7 @@
                                               (->> elem .-appTitle str (.setText app-label)))
                                             (reset-labels))
                                             ;; OK skip tree locking when in Swing EDT
-                                            (-> veil .getContentPane (.getComponent 0) .repaint)))))))
+                                          (-> veil .getContentPane (.getComponent 0) .repaint)))))))
         find-action (proxy [AbstractAction] [nil (icon ::crosshair :large)]
                       (actionPerformed [evt]
                         (let [find-button (.getSource evt)]

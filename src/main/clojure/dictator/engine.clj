@@ -14,21 +14,52 @@
 
 (ns dictator.engine
   (:require
-    [clojure.core.async :refer [<! >! chan close! go]])
+    [dictator.audio :refer [bit-depth big-endian?]]
+    [dictator.tokens :as tokens]
+    [dictator.util :as util]
+    [clojure.core.async :refer [<! >! chan close! go]]
+    [clojure.string :refer [join lower-case]])
   (:import
     dictator.Native$MP3Enc
-    [java.util Locale Map]
+    [java.io ByteArrayInputStream IOException ByteArrayOutputStream]
+    [java.util Locale UUID]
+    [javax.sound.sampled AudioFileFormat$Type AudioFormat AudioInputStream AudioSystem]
     us.monoid.json.JSONObject
     [us.monoid.web Content Resty Resty$Option]))
 
-(def ^:private en Locale/ENGLISH)
-(def ^:private ru (Locale. "ru"))
+(def ^:private en Locale/US)
+(def ^:private ru (Locale. "ru" "RU"))
+(def ^:private de (Locale. "de" "DE"))
+(def ^:private fr (Locale. "fr" "FR"))
+(def ^:private it (Locale. "it" "IT"))
+(def ^:private nl (Locale. "nl" "NL"))
 (def ^:private resty-options (into-array Resty$Option [(Resty$Option/timeout 5000)]))
+(def ^:private bing-token-validity (.toNanos java.util.concurrent.TimeUnit/SECONDS 570))
 
 (defn- to-str [s]
   (if (= s JSONObject/NULL)
     ""
     (str s)))
+
+(defn- to-params [params]
+  (join
+    "&"
+    (for [[k v] params]
+      (str (Resty/enc k) "=" (Resty/enc v)))))
+
+(defn- to-wav [format raw]
+  ;; no need to close streams because they're in-memory
+  (let [frame-count (/ (alength raw) (.getFrameSize format))
+        input (AudioInputStream. (ByteArrayInputStream. raw) format frame-count)
+        output (ByteArrayOutputStream. 16384)]
+    (AudioSystem/write input AudioFileFormat$Type/WAVE output)
+    (.toByteArray output)))
+
+(defmacro ^:private try-io [msg body]
+  `(try
+     ~body
+     (catch IOException e#
+       (throw (ex-info ~msg {} e#)))))
 
 (defprotocol SRFactory
   "A speech recognition engine factory."
@@ -37,7 +68,7 @@
 
 (defprotocol SR
   "A generic speech recognition technology."
-  (sample-rate [this] "Required PCM audio sample rate.")
+  (audio-format [this] "Required audio format.")
   (as-text [this audio] "Turns provided PCM audio chunk into text."))
 
 (deftype WitAI []
@@ -48,58 +79,90 @@
                     :qnormal [16000 128]
                     :qhigh [32000 192]}
             [srate brate] (quality params)
+            frmt (AudioFormat. srate bit-depth 1 true big-endian?)
             api-url "https://api.wit.ai/speech?v=20160110&n=0"
-            wit-tokens {en "WLHZ3HZPSLBUOR2SEOAX5PMDSKKYNFKU"
-                        ru "6K6G5BQWQSCRHT23CVL6ECBGOHER2CI3"}
+            wit-tokens {en tokens/witai-en-key
+                        ru tokens/witai-ru-key}
             auth-header (str "Bearer " (wit-tokens lang))
             resty (doto (Resty. resty-options)
                     (.withHeader "Authorization" auth-header))
             encoder (Native$MP3Enc. srate brate)]
         (reify
           SR
-            (sample-rate [_] srate)
+            (audio-format [_] frmt)
             (as-text [_ audio]
               (let [content (->> audio (.encode encoder) (Content. "audio/mpeg3"))
-                    result (.json resty api-url content)]
+                    result (try-io
+                             "Speech recongnition failed"
+                             (.json resty api-url content))]
                 (if (.status result 200)
-                  (-> result (.get "_text") to-str)
+                  (to-str (.get result "_text"))
                   (throw (ex-info "Speech recongnition failed" {:code (-> result .http .getResponseCode)
                                                                 :msg (-> result .http .getResponseMessage)})))))
           java.lang.AutoCloseable
             (close [_] (.close encoder)))))
-  java.lang.Object
+  Object
     (toString [_] "WitAI"))
 
-(deftype ApiAI []
+(deftype BingSpeech []
   SRFactory
-    (supports [_] [en ru])
+    (supports [_] [en nl fr de it ru])
     (create [_ quality lang]
-      (let [api-url "https://api.api.ai/v1/query?v=20160110"
-            auth-header "Bearer 4ac5e5727ad9432f8ca167f3a92b55e1"
-            subscription-header "18bd8281-bf78-4d70-b170-c43f0d17ea80"
-            request-content (Resty/content (JSONObject. ^Map {"lang" (.getLanguage lang)
-                                                              "sessionId" (str (System/currentTimeMillis))}))
+      (let [frmt (AudioFormat. 16000 bit-depth 1 true big-endian?)
+            api-url "https://speech.platform.bing.com/recognize"
+            params {"appID" "d4d52672-91d7-4c74-8ad8-42b1d98141a5"
+                    "device.os" (-> util/platform :os name)
+                    "format" "json"
+                    "instanceid" (str (UUID/randomUUID))
+                    "locale" (.toLanguageTag lang)
+                    "result.profanitymarkup" "0"
+                    "scenarios" "websearch"
+                    "version" "3.0"}
             resty (doto (Resty. resty-options)
-                    (.withHeader "Authorization" auth-header)
-                    (.withHeader "ocp-apim-subscription-key" subscription-header))]
+                    (.withHeader "Ocp-Apim-Subscription-Key" tokens/bing-key))
+            token (atom {:token nil :timestamp 0})
+            issue-token (fn []
+                          (let [token-url "https://api.cognitive.microsoft.com/sts/v1.0/issueToken"
+                                result (try-io
+                                         "Token issuing failed"
+                                         (.text resty token-url (Resty/content "")))]
+                            (if (.status result 200)
+                              (str result)
+                              (throw
+                                (ex-info
+                                  "Couldn't get access token"
+                                  {:code (-> result .http .getResponseCode)
+                                   :msg (-> result .http .getResponseMessage)})))))
+            get-token (fn []
+                        (let [{tk :token ts :timestamp} @token]
+                          (if (and tk (< (- (System/nanoTime) ts) bing-token-validity))
+                            tk
+                            (:token (swap! token assoc :token (issue-token) :timestamp (System/nanoTime))))))]
         ;; currently supports 16kHz 16-bit mono signed PCM audio only
         (reify
           SR
-            (sample-rate [_] 16000)
+            (audio-format [_] frmt)
             (as-text [_ audio]
-              (let [form-data [(Resty/data "request" request-content)
-                               (Resty/data "voiceData" (Content. "audio/wav" audio))]
-                    result (.json resty api-url (-> form-data into-array Resty/form))]
-                (if (-> result (.get "status.code") (= 200))
-                  (-> result (.get "result.resolvedQuery") to-str)
-                  (throw (ex-info "Speech recongnition failed" {:code (.get result "status.code")
-                                                                :msg (.get result "status.errorDetails")})))))
+              (let [auth-header (str "Bearer " (get-token))
+                    resty (doto (Resty. resty-options)
+                            (.withHeader "Authorization" auth-header))
+                    content (Content. "audio/wav;samplerate=16000" (to-wav frmt audio))
+                    url (->> (UUID/randomUUID) str (assoc params "requestid") to-params (str api-url "?"))
+                    result (try-io
+                             "Speech recongnition failed"
+                             (.json resty url content))]
+                (if (.status result 200)
+                  (if (-> result (.get "header.status") lower-case (= "success"))
+                    (to-str (.get result "results[0].lexical"))
+                    "")
+                  (throw (ex-info "Speech recongnition failed" {:code (-> result .http .getResponseCode)
+                                                                :msg (-> result .http .getResponseMessage)})))))
           java.lang.AutoCloseable
             (close [_]))))
-  java.lang.Object
-    (toString [_] "ApiAI"))
+  Object
+    (toString [_] "Bing Speech"))
 
-(defonce engine-factories [(WitAI.) (ApiAI.)])
+(defonce engine-factories [(BingSpeech.) (WitAI.)])
 
 (defn recognize-speech
   "Returns a channel with recongnized speech."

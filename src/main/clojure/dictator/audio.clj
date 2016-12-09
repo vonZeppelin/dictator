@@ -22,11 +22,11 @@
     java.nio.ByteOrder
     [javax.sound.sampled AudioFormat AudioInputStream AudioSystem DataLine$Info Mixer Mixer$Info TargetDataLine]))
 
-(def ^:private ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
-;; the only value supported by WebRTC VAD?
-(def ^:private ^:const bit-depth 16)
 ;; 30ms frames to make WebRTC VAD happy
 (def ^:private ^:const frame-length 0.03)
+
+(def ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
+(def ^:const bit-depth 16)
 
 (defn get-mixers
   "Returns a sequence of mixers supporting audio capturing. A mixer is wrapped into a ValueHolder instance."
@@ -49,11 +49,10 @@
 
 (defn capture-sound
   "Returns a channel of captured voice frames."
-  [mixer-info sample-rate]
+  [mixer-info frmt]
   (let [out-channel (chan)]
     (thread
-      (let [frmt (AudioFormat. sample-rate bit-depth 1 true big-endian?)
-            buffer-size (int (* frame-length (.getFrameSize frmt) (.getFrameRate frmt)))
+      (let [buffer-size (int (* frame-length (.getFrameSize frmt) (.getFrameRate frmt)))
             buffer (byte-array buffer-size)]
         (with-open [line (AudioSystem/getTargetDataLine frmt (.value mixer-info))
                     stream (AudioInputStream. line)]
@@ -68,8 +67,9 @@
 
 (defn filter-voice
   "Returns a channel of frames with actual voice."
-  [audio-channel frame-rate vad-mode]
-  (let [out-channel (chan)
+  [audio-channel audio-format vad-mode]
+  (let [frame-rate (.getFrameRate audio-format)
+        out-channel (chan)
         ;; let's do voice / no voice decision based on 5 consecutive frames
         parted-channel (async/partition 5 audio-channel)]
     (go
