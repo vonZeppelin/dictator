@@ -105,13 +105,6 @@ public final class Native {
                 ptr = null;
             }
         }
-
-        @Override
-        protected void finalize() {
-          if (ptr != null) {
-            System.out.println("Error!!!");
-          }
-        }
     }
 
     public static UIElem findElement(Window veil, Point cursor) {

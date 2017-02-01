@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 2.8 FATAL_ERROR)
 
 project(Dictator C)
 
+find_package(Java REQUIRED)
 find_package(JNI REQUIRED)
+include(UseJava)
+
 if (UNIX)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wpedantic -pipe -msse2 -ffast-math -funroll-loops -flto -fvisibility=hidden")
     set(WEBRTC_DEFS WEBRTC_POSIX)
@@ -36,6 +39,11 @@ elseif (MSVC)
 else()
     message(FATAL_ERROR "Unsupported target platform")
 endif()
+
+create_javah(TARGET jni_headers
+    CLASSES dictator.Native
+    CLASSPATH ${CMAKE_CURRENT_SOURCE_DIR}/../java
+)
 
 # Subset of the WebRTC project with VAD module
 add_library(webrtc STATIC
@@ -121,8 +129,9 @@ add_library(dictator SHARED
     ${DICTATOR_SRC}
 )
 target_include_directories(dictator
-    PRIVATE ${JNI_INCLUDE_DIRS} ${EXTRA_LIB}
+    PRIVATE ${JNI_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR} ${EXTRA_LIB}
 )
 target_link_libraries(dictator
     PRIVATE webrtc lame ${EXTRA_LIBS}
 )
+add_dependencies(dictator jni_headers)
