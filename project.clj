@@ -3,10 +3,10 @@
   :url "https://github.com/vonZeppelin/dictator"
   :license {:name "Apache License 2.0"
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
-  :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.clojure/core.async "0.2.395"]
+  :dependencies [[org.clojure/clojure "1.9.0"]
+                 [org.clojure/core.async "0.4.474"]
                  [us.monoid.web/resty "0.3.2"]
-                 [com.miglayout/miglayout-swing "5.0"]]
+                 [com.miglayout/miglayout-swing "5.1"]]
   :plugins [[lein-resource "16.9.1"]]
   :hooks [leiningen.resource]
   :source-paths ["src/main/clojure" "target/clj"]

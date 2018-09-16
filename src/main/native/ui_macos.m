@@ -4,14 +4,14 @@
 #include "dictator_Native.h"
 #include "jni_util.h"
 
-static JNF_CLASS_CACHE(WINDOW, "java/awt/Window");
-static JNF_MEMBER_CACHE(WINDOW_getPeer, WINDOW, "getPeer", "()Ljava/awt/peer/ComponentPeer;");
+static JNF_CLASS_CACHE(COMPONENT, "java/awt/Component");
+static JNF_MEMBER_CACHE(COMPONENT_peer, COMPONENT, "peer", "Ljava/awt/peer/ComponentPeer;");
 
 static JNF_CLASS_CACHE(LWWINDOWPEER, "sun/lwawt/LWWindowPeer");
-static JNF_MEMBER_CACHE(LWWINDOWPEER_getPlatformWindow, LWWINDOWPEER, "getPlatformWindow", "()Lsun/lwawt/PlatformWindow;");
+static JNF_MEMBER_CACHE(LWWINDOWPEER_platformWindow, LWWINDOWPEER, "platformWindow", "Lsun/lwawt/PlatformWindow;");
 
 static JNF_CLASS_CACHE(CPLATFORMWINDOW, "sun/lwawt/macosx/CPlatformWindow");
-static JNF_MEMBER_CACHE(CPLATFORMWINDOW_getNSWindowPtr, CPLATFORMWINDOW, "getNSWindowPtr", "()J");
+static JNF_MEMBER_CACHE(CPLATFORMWINDOW_ptr, CPLATFORMWINDOW, "ptr", "J");
 
 static JNF_CLASS_CACHE(RECTANGLE, "java/awt/Rectangle");
 static JNF_CTOR_CACHE(RECTANGLE_ctor, RECTANGLE, "(IIII)V");
@@ -23,9 +23,9 @@ JNIEXPORT jobject JNICALL Java_dictator_Native_findElement(JNIEnv *env, jclass c
                                                            jobject veil, jint cursorX, jint cursorY) {
 JNF_COCOA_ENTER(env)
     // JAWT is no longer supported on OSX, let's do some dirty digging to find NSWindow* of the veil
-    jobject peer = JNFCallObjectMethod(env, veil, WINDOW_getPeer);
-    jobject platformWindow = JNFCallObjectMethod(env, peer, LWWINDOWPEER_getPlatformWindow);
-    NSWindow *nsVeil = jlong_to_ptr(JNFCallLongMethod(env, platformWindow, CPLATFORMWINDOW_getNSWindowPtr));
+    jobject peer = JNFGetObjectField(env, veil, COMPONENT_peer);
+    jobject platformWindow = JNFGetObjectField(env, peer, LWWINDOWPEER_platformWindow);
+    NSWindow *nsVeil = jlong_to_ptr(JNFGetLongField(env, platformWindow, CPLATFORMWINDOW_ptr));
 
     CGPoint cursor = CGPointMake(cursorX, cursorY);
     CGWindowListOption windowSearchOpts = kCGWindowListOptionOnScreenBelowWindow | kCGWindowListExcludeDesktopElements;

@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include "dictator_Native.h"
-#include "webrtc/webrtc/common_audio/vad/include/webrtc_vad.h"
+#include "common_audio/vad/include/webrtc_vad.h"
 #include "lame.h"
 #include "jni_util.h"
 
