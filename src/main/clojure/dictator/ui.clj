@@ -1,4 +1,4 @@
-;; Copyright 2014 Leonid Bogdanov
+;; Copyright 2014-2019 Leonid Bogdanov
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -14,13 +14,14 @@
 
 (ns dictator.ui
   (:require
-    [clojure.core.async :refer [<! close! go-loop]]
-    [dictator [audio :as audio]
-              [engine :as engine]
-              [util :refer [icon text ->ValueHolder]]])
+    [dictator
+      [audio :as audio]
+      [engine :as engine]
+      [util :refer [icon text ->ValueHolder]]]
+    [clojure.core.async :refer [<! close! go-loop]])
   (:import
-    net.miginfocom.swing.MigLayout
     [dictator LCDPanel Native Native$Aggressiveness]
+    net.miginfocom.swing.MigLayout
     [java.awt BasicStroke BorderLayout Color Insets Point Rectangle RenderingHints Toolkit]
     [java.awt.event KeyEvent MouseAdapter WindowAdapter]
     [javax.swing AbstractAction DefaultBoundedRangeModel DefaultComboBoxModel Icon JCheckBox JComboBox JFrame

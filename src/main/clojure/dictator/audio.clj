@@ -1,4 +1,4 @@
-;; Copyright 2014 Leonid Bogdanov
+;; Copyright 2014-2019 Leonid Bogdanov
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -14,24 +14,23 @@
 
 (ns dictator.audio
   (:require
-    [clojure.core.async :as async :refer [<! >! >!! alt! chan close! go go-loop thread timeout]]
-    [dictator.util :refer [platform ->ValueHolder]])
+    [dictator.util :refer [platform ->ValueHolder]]
+    [clojure.core.async :as async :refer [<! >! >!! alt! chan close! go go-loop]])
   (:import
     dictator.Native$VAD
     java.io.ByteArrayOutputStream
-    java.nio.ByteOrder
     [javax.sound.sampled AudioFormat AudioInputStream AudioSystem DataLine$Info Mixer Mixer$Info TargetDataLine]))
 
 ;; 30ms frames to make WebRTC VAD happy
 (def ^:private ^:const frame-length 0.03)
 
-(def ^:const big-endian? (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder)))
 (def ^:const bit-depth 16)
 
 (defn get-mixers
   "Returns a sequence of mixers supporting audio capturing. A mixer is wrapped into a ValueHolder instance."
   []
-  (let [is-win? (= (:os platform) :win)
+  (let [win? (= (:os platform) :win)
+        big-endian? (:is-big-endian platform)
         ;; let's use the max supported sample rate to filter out mixers
         test-format (AudioFormat. 32000 bit-depth 1 true big-endian?)
         line-info (DataLine$Info. TargetDataLine test-format)
@@ -41,7 +40,7 @@
                          (.isLineSupported mixer line-info)))
         wrap (fn [info]
                (let [name (.getName info)
-                     fixed-name (if is-win?
+                     fixed-name (if win?
                                   (-> name (.getBytes "windows-1252") String.)
                                   name)]
                  (->ValueHolder fixed-name info)))]
@@ -51,7 +50,7 @@
   "Returns a channel of captured voice frames."
   [mixer-info frmt]
   (let [out-channel (chan)]
-    (thread
+    (async/thread
       (let [buffer-size (int (* frame-length (.getFrameSize frmt) (.getFrameRate frmt)))
             buffer (byte-array buffer-size)]
         (with-open [line (AudioSystem/getTargetDataLine frmt (.value mixer-info))
@@ -89,7 +88,7 @@
 (defn aggregate-chunks
   "Returns a channel with aduio frames aggregated into larger chunks
    based on pauses in speech of greater than or equal to specified ms length."
-  [audio-channel pause-lenght]
+  [audio-channel pause-length]
   (let [out-channel (chan)
         ;; reusable buffer of initially 50kB
         chunk (ByteArrayOutputStream. 50000)]
@@ -99,10 +98,10 @@
                                        (.write chunk frame)
                                        (recur))
                                      (close! out-channel)))
-            (timeout pause-lenght) (if (zero? (.size chunk))
-                                     (recur)
-                                     (do
-                                       (>! out-channel (.toByteArray chunk))
-                                       (.reset chunk)
-                                       (recur)))))
+            (async/timeout pause-length) (if (zero? (.size chunk))
+                                           (recur)
+                                           (do
+                                             (>! out-channel (.toByteArray chunk))
+                                             (.reset chunk)
+                                             (recur)))))
     out-channel))

@@ -1,4 +1,4 @@
-;; Copyright 2014 Leonid Bogdanov
+;; Copyright 2014-2019 Leonid Bogdanov
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -14,38 +14,41 @@
 
 (ns dictator.engine
   (:require
-    [dictator.audio :refer [bit-depth big-endian?]]
-    [dictator.tokens :as tokens]
-    [dictator.util :as util]
+    [dictator
+      [audio :as audio]
+      [tokens :as tokens]
+      [util :as util]]
     [clojure.core.async :refer [<! >! chan close! go]]
     [clojure.string :refer [join lower-case]])
   (:import
     dictator.Native$MP3Enc
+    us.monoid.json.JSONObject
+    [us.monoid.web Content Resty Resty$Option]
     [java.io ByteArrayInputStream IOException ByteArrayOutputStream]
     [java.util Locale UUID]
-    [javax.sound.sampled AudioFileFormat$Type AudioFormat AudioInputStream AudioSystem]
-    us.monoid.json.JSONObject
-    [us.monoid.web Content Resty Resty$Option]))
+    [javax.sound.sampled AudioFileFormat$Type AudioFormat AudioInputStream AudioSystem]))
 
+(def ^:private de Locale/GERMANY)
 (def ^:private en Locale/US)
-(def ^:private ru (Locale. "ru" "RU"))
-(def ^:private de (Locale. "de" "DE"))
-(def ^:private fr (Locale. "fr" "FR"))
-(def ^:private it (Locale. "it" "IT"))
+(def ^:private fr Locale/FRANCE)
+(def ^:private it Locale/ITALY)
 (def ^:private nl (Locale. "nl" "NL"))
-(def ^:private resty-options (into-array Resty$Option [(Resty$Option/timeout 5000)]))
-(def ^:private bing-token-validity (.toNanos java.util.concurrent.TimeUnit/SECONDS 570))
+(def ^:private ru (Locale. "ru" "RU"))
 
-(defn- to-str [s]
-  (if (= s JSONObject/NULL)
-    ""
-    (str s)))
+(def ^:private resty-options (into-array
+                               Resty$Option
+                               [(Resty$Option/timeout 5000)]))
 
 (defn- to-params [params]
   (join
     "&"
     (for [[k v] params]
       (str (Resty/enc k) "=" (Resty/enc v)))))
+
+(defn- to-str [s]
+  (if (= s JSONObject/NULL)
+    ""
+    (str s)))
 
 (defn- to-wav [format raw]
   ;; no need to close streams because they're in-memory
@@ -75,18 +78,18 @@
   SRFactory
     (supports [_] [en ru])
     (create [_ quality lang]
-      (let [params {:qlow [8000 64]
-                    :qnormal [16000 128]
-                    :qhigh [32000 192]}
-            [srate brate] (quality params)
-            frmt (AudioFormat. srate bit-depth 1 true big-endian?)
-            api-url "https://api.wit.ai/speech?v=20160110&n=0"
+      (let [api-url "https://api.wit.ai/speech?v=20190101&n=1"
+            encoder-params {:qlow [8000 64]
+                            :qnormal [16000 128]
+                            :qhigh [32000 192]}
             wit-tokens {en tokens/witai-en-key
                         ru tokens/witai-ru-key}
+            [sample-rate bitrate] (quality encoder-params)
+            frmt (AudioFormat. sample-rate audio/bit-depth 1 true (:is-big-endian util/platform))
             auth-header (str "Bearer " (wit-tokens lang))
             resty (doto (Resty. resty-options)
                     (.withHeader "Authorization" auth-header))
-            encoder (Native$MP3Enc. srate brate)]
+            encoder (Native$MP3Enc. sample-rate bitrate)]
         (reify
           SR
             (audio-format [_] frmt)
@@ -104,65 +107,39 @@
   Object
     (toString [_] "WitAI"))
 
-(deftype BingSpeech []
+(deftype AzureSpeech []
   SRFactory
-    (supports [_] [en nl fr de it ru])
+    (supports [_] [de en fr it nl ru])
     (create [_ quality lang]
-      (let [frmt (AudioFormat. 16000 bit-depth 1 true big-endian?)
-            api-url "https://speech.platform.bing.com/recognize"
-            params {"appID" "d4d52672-91d7-4c74-8ad8-42b1d98141a5"
-                    "device.os" (-> util/platform :os name)
-                    "format" "json"
-                    "instanceid" (str (UUID/randomUUID))
-                    "locale" (.toLanguageTag lang)
-                    "result.profanitymarkup" "0"
-                    "scenarios" "websearch"
-                    "version" "3.0"}
+      (let [api-url "https://southeastasia.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
+            query-params {"format" "simple"
+                          "language" (.toLanguageTag lang)
+                          "profanity" "raw"}
+            frmt (AudioFormat. 16000 audio/bit-depth 1 true (:is-big-endian util/platform))
             resty (doto (Resty. resty-options)
-                    (.withHeader "Ocp-Apim-Subscription-Key" tokens/bing-key))
-            token (atom {:token nil :timestamp 0})
-            issue-token (fn []
-                          (let [token-url "https://api.cognitive.microsoft.com/sts/v1.0/issueToken"
-                                result (try-io
-                                         "Token issuing failed"
-                                         (.text resty token-url (Resty/content "")))]
-                            (if (.status result 200)
-                              (str result)
-                              (throw
-                                (ex-info
-                                  "Couldn't get access token"
-                                  {:code (-> result .http .getResponseCode)
-                                   :msg (-> result .http .getResponseMessage)})))))
-            get-token (fn []
-                        (let [{tk :token ts :timestamp} @token]
-                          (if (and tk (< (- (System/nanoTime) ts) bing-token-validity))
-                            tk
-                            (:token (swap! token assoc :token (issue-token) :timestamp (System/nanoTime))))))]
+                    (.withHeader "Ocp-Apim-Subscription-Key" tokens/azure-key))]
         ;; currently supports 16kHz 16-bit mono signed PCM audio only
         (reify
           SR
             (audio-format [_] frmt)
             (as-text [_ audio]
-              (let [auth-header (str "Bearer " (get-token))
-                    resty (doto (Resty. resty-options)
-                            (.withHeader "Authorization" auth-header))
-                    content (Content. "audio/wav;samplerate=16000" (to-wav frmt audio))
-                    url (->> (UUID/randomUUID) str (assoc params "requestid") to-params (str api-url "?"))
+              (let [content (->> audio (to-wav frmt) (Content. "audio/wav;codecs=audio/pcm;samplerate=16000"))
+                    url (->> query-params to-params (str api-url "?"))
                     result (try-io
                              "Speech recongnition failed"
                              (.json resty url content))]
                 (if (.status result 200)
-                  (if (-> result (.get "header.status") lower-case (= "success"))
-                    (to-str (.get result "results[0].lexical"))
+                  (if (= (.get result "RecognitionStatus") "Success")
+                    (to-str (.get result "DisplayText"))
                     "")
                   (throw (ex-info "Speech recongnition failed" {:code (-> result .http .getResponseCode)
                                                                 :msg (-> result .http .getResponseMessage)})))))
           java.lang.AutoCloseable
             (close [_]))))
   Object
-    (toString [_] "Bing Speech"))
+    (toString [_] "Azure Speech"))
 
-(defonce engine-factories [(BingSpeech.) (WitAI.)])
+(defonce engine-factories [(AzureSpeech.) (WitAI.)])
 
 (defn recognize-speech
   "Returns a channel with recongnized speech."

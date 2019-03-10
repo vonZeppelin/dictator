@@ -1,4 +1,4 @@
-;; Copyright 2014 Leonid Bogdanov
+;; Copyright 2014-2019 Leonid Bogdanov
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -14,27 +14,32 @@
 
 (ns dictator.util
   (:require
-    [clojure.string :as string]
-    [clojure.java.io :as io])
+    [clojure.java.io :as io]
+    [clojure.string :as str])
   (:import
     dictator.Native
+    java.nio.ByteOrder
     java.nio.file.Files
     javax.swing.ImageIcon
     [java.util MissingResourceException ResourceBundle]))
 
-;; icon size -> icon resource name templates
-(def ^:private icon-sizes {:small "%s.png" :large "%s.32.png"})
+;; icon size -> icon resource name template
+(def ^:private icon-sizes {:small "%s.png"
+                           :large "%s.32.png"})
 
-(defonce platform (let [os (condp #(string/starts-with? %2 %1) (System/getProperty "os.name")
-                             "Windows" :win
-                             "Mac" :mac
-                             "Darwin" :mac
-                             :nix)
-                        arch (or
-                               (System/getProperty "sun.arch.data.model")
-                               (System/getProperty "com.ibm.vm.bitmode")
-                               (-> (System/getProperty "os.arch") string/trim string/lower-case))]
-                     {:os os :is64 (contains? #{"64" "x86_64" "ia64" "amd64" "ppc64"} arch)}))
+(defonce platform
+  (let [os (condp #(str/starts-with? %2 %1) (System/getProperty "os.name")
+             "Windows" :win
+             "Mac" :mac
+             "Darwin" :mac
+             :nix)
+        arch (or
+              (System/getProperty "sun.arch.data.model")
+              (System/getProperty "com.ibm.vm.bitmode")
+              (-> (System/getProperty "os.arch") str/trim str/lower-case))]
+    {:os os
+     :is-64 (contains? #{"64" "x86_64" "ia64" "amd64" "ppc64"} arch)
+     :is-big-endian (= ByteOrder/BIG_ENDIAN (ByteOrder/nativeOrder))}))
 
 ;; A holder of a named value.
 (deftype ValueHolder [name value]
@@ -43,7 +48,7 @@
 
 (defn text
   "Returns a string resource identified by a key. A ResourceBundle to query is calculated from the key's namespace."
-  [key & args]
+  ^String [key & args]
   (let [bundle (-> key namespace munge ResourceBundle/getBundle)
         key (name key)
         str (try
@@ -60,7 +65,7 @@
     (icon key :small))
   ([key size]
     (let [icon-name (format (icon-sizes size) (name key))
-          icon-path (-> key namespace munge (string/replace \. \/) (str \/ icon-name))
+          icon-path (-> key namespace munge (str/replace \. \/) (str \/ icon-name))
           icon (-> icon-path io/resource ImageIcon.)]
       icon)))
 
@@ -69,10 +74,10 @@
   []
   (let [lib-attrs (make-array java.nio.file.attribute.FileAttribute 0)
         lib-name (System/mapLibraryName "dictator")
-        lib-res (if (:is64 platform)
-                  (string/replace-first lib-name #"\.(?=\w+$)" "64.")
-                  lib-name)
+        lib-resource (if (:is-64 platform)
+                       (str/replace-first lib-name #"\.(?=\w+$)" "64.")
+                       lib-name)
         lib-file (.toFile (Files/createTempFile nil lib-name lib-attrs))]
-    (with-open [lib (-> lib-res io/resource io/input-stream)]
+    (with-open [lib (-> lib-resource io/resource io/input-stream)]
       (io/copy lib lib-file)
       (Native/loadLibrary lib-file))))
