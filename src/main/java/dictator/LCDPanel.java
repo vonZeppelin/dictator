@@ -16,7 +16,9 @@
 
 package dictator;
 
-import java.awt.Color;
+import java.awt.*;
+import java.io.IOException;
+import java.io.InputStream;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 
@@ -28,7 +30,7 @@ import net.miginfocom.swing.MigLayout;
  * @author Leonid Bogdanov
  */
 public final class LCDPanel extends JPanel {
-    private static final String NO_TIME = "-- : --";
+    private static final String NO_TIME = "12:45";
 
     private final JLabel timer;
 
@@ -36,7 +38,15 @@ public final class LCDPanel extends JPanel {
         super(new MigLayout("wrap 2", "[grow 120]unrel[]", "[]unrel[]"));
         setBackground(Color.BLACK);
 
+        Font clockFont;
+        try (InputStream is = getClass().getResourceAsStream("/lcd.ttf")) {
+            clockFont = Font.createFont(Font.TRUETYPE_FONT, is);
+        } catch (IOException | FontFormatException e) {
+            clockFont = Font.decode(null);
+        }
+
         timer = new JLabel(NO_TIME, JLabel.CENTER);
+        timer.setFont(clockFont.deriveFont(30f));
         timer.setForeground(Color.CYAN.brighter());
         add(timer, "growx,span 2");
     }

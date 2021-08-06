@@ -86,3 +86,30 @@ JNF_COCOA_EXIT(env)
 JNIEXPORT void JNICALL Java_dictator_Native_freeElement(JNIEnv *env, jclass clazz, jlong ptr) {
     CFRelease(jlong_to_ptr(ptr));
 }
+
+JNIEXPORT void JNICALL Java_dictator_Native_insertText(JNIEnv *env, jclass clazz, jlong ptr, jstring text) {
+JNF_COCOA_ENTER(env)
+    NSPasteboard *pboard = NSPasteboard.generalPasteboard;
+    NSMutableArray *archive = [NSMutableArray array];
+    for (NSPasteboardItem *item in pboard.pasteboardItems)
+    {
+        NSPasteboardItem *archivedItem = [[NSPasteboardItem alloc] init];
+        for (NSString *type in [item types])
+        {
+            NSData *data = [[item dataForType:type] mutableCopy];
+            if (data) {
+                [archivedItem setData:data forType:type];
+            }
+            }
+            [archive addObject:archivedItem];
+        }
+    @try {
+        [pboard clearContents];
+        [pboard setString:JNFJavaToNSString(env, text) forType:NSPasteboardTypeString];
+    }
+    @finally {
+        [pboard clearContents];
+        [pboard writeObjects:archive];
+    }
+JNF_COCOA_EXIT(env)
+}

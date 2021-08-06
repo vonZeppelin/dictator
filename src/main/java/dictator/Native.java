@@ -98,6 +98,10 @@ public final class Native {
             this.ptr = ptr;
         }
 
+        public void insertText(String text) {
+            Native.insertText(ptr, text);
+        }
+
         @Override
         public synchronized void close() {
             if (ptr != null) {
@@ -122,6 +126,7 @@ public final class Native {
     private static native byte[] encodeLAME(long handle, byte[] audio);
     private static native void freeLAME(long handle);
     private static native UIElem findElement(Window veil, int cursorX, int cursorY);
+    private static native void insertText(long ptr, String text);
     private static native void freeElement(long ptr);
 
     private Native() {}

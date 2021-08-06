@@ -107,8 +107,8 @@
 
 (defn- build-input-tab
   "Builds Input tab."
-  []
-  (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
+  ^JPanel []
+  (doto (JPanel. (MigLayout. "ay center,wrap" "[]rel[grow]" "[center]unrel[center]"))
     (.add (JLabel. (text ::device)))
     (.add
       (doto (JComboBox. mixers-model)
@@ -135,7 +135,7 @@
 ;; TODO Handle multimonitor envs
 (defn- build-output-tab
   "Builds Output tab."
-  [frame]
+  ^JPanel [frame]
   (let [tkit (Toolkit/getDefaultToolkit)
         xhair-icon (icon ::crosshair)
         xhair-hotspot (Point.
@@ -182,7 +182,7 @@
                                                 (float-array [5.0])
                                                 0.0)
                                   veil (JWindow. frame)
-                                  canvas (proxy [JPanel] [nil]
+                                  canvas (proxy [JPanel] [nil false]
                                            (paintComponent [g]
                                              (proxy-super paintComponent g)
                                              (when-let [elem @selected-element]
@@ -220,7 +220,7 @@
                                 (.setBounds (-> tkit .getScreenSize Rectangle.))
                                 (.setCursor xhair-cursor)
                                 (.setVisible true)))))))]
-    (doto (JPanel. (MigLayout. "wrap 3" "[]25[]rel[grow]" "[]rel[]"))
+    (doto (JPanel. (MigLayout. "wrap" "[]25[]rel[grow]" "[]rel[]"))
       (.add
         (doto (JToggleButton. find-action)
           (.setToolTipText (text ::find.tip))
@@ -237,13 +237,13 @@
 
 (defn- build-misc-tab
   "Builds Misc tab."
-  [frame]
+  ^JPanel [frame]
   (let [ontop-action (proxy [AbstractAction] [(text ::ontop)]
                        (actionPerformed [evt]
                          (->> evt .getSource .isSelected (.setAlwaysOnTop frame)))
                        (isEnabled []
                          (.isAlwaysOnTopSupported frame)))]
-    (doto (JPanel. (MigLayout. "aligny center,wrap 2" "[]rel[grow]" "[center]unrel[center]"))
+    (doto (JPanel. (MigLayout. "aligny center,wrap" "[]rel[grow]" "[center]unrel[center]"))
       (.add (JCheckBox. ontop-action) "spanx 2")
       (.add (JLabel. (text ::engine)))
       (.add
@@ -282,7 +282,7 @@
                               (-> frame .getJMenuBar (.setVisible selected?))
                               (.pack frame))))]
     (doto frame
-      (.setLayout (MigLayout. "wrap 2" "[]unrel[]" "[]5[nogrid][]"))
+      (.setLayout (MigLayout. "wrap" "[]unrel[]" "[]5[nogrid][]"))
       (.add (doto (JToggleButton. rec-action)
               (.setToolTipText (text ::rec.tip))
               (.setIcon (icon ::rec-off :large))
